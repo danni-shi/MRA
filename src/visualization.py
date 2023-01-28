@@ -1,10 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import statsmodels.tsa.stattools as smt
+import os
 import utils
-# x = np.array([2, 3, 5, 7, 11, 13])
-# y = np.array([np.roll(x,k) for k in range(len(x))])
-# print(y)
+
+abspath = os.path.abspath(__file__)
+dname = os.path.dirname(abspath)
+os.chdir(dname)
+
 x = np.arange(5)
 y = np.roll(x,1)
 x_aligned = utils.align_to_ref(x,y)
@@ -14,7 +16,7 @@ with open('test.npy', 'rb') as f:
     signal = np.load(f)
     X0 = np.load(f)
 
-
+X_est = X_est.flatten()
 plt.rcParams['text.usetex'] = True
 # use convolution theorem https://en.wikipedia.org/wiki/Cross-correlation
 signal_fft = np.fft.fft(signal)
