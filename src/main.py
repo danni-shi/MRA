@@ -36,7 +36,7 @@ signal = (x-np.mean(x))/np.std(x)
 # x = np.linspace(-1, 1, 50)
 # signal = pd.Series((x-np.mean(x))/np.std(x))
 
-num_copies = 5000
+num_copies = 500
 sigma = 0.1
 max_shift= 0.1
 
@@ -70,16 +70,17 @@ L = len(signal)
 np.random.seed(42)
 X0 = np.random.normal(0, 1, L)
 # X0 = np.zeros(L)
-X_est = optimization.optimise_manopt(observations, sigma, X0, extra_inits=2)
+X_est = optimization.optimise_manopt(observations, sigma, X0, extra_inits=0)
 # X_est = opt_new.optimise_manopt(observations, sigma, X0, extra_inits=0)
 
-with open('test.npy', 'wb') as f:
+with open('visual.npy', 'wb') as f:
     np.save(f, X_est)
     np.save(f, signal)
     np.save(f,X0)
 
 # print(X_est)
 # print(signal)
-print('relative error = ', np.linalg.norm(X_est-signal)/np.linalg.norm(signal))
+X_aligned = utils.align_to_ref(X_est.flatten(),signal)
+print('relative error = ', np.linalg.norm(X_aligned-signal)/np.linalg.norm(signal))
 
 

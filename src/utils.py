@@ -3,8 +3,10 @@ import datetime as dt
 from matplotlib import pyplot as plt, dates
 import random
 import time
-# import numpy as np
+import numpy as np
 import autograd.numpy as np
+from autograd import elementwise_grad as egrad
+from autograd import jacobian
 
 
 def get_dataset(type, ticker, date, nlevels, start = '34200000', end = '57600000'):
@@ -96,7 +98,7 @@ def random_shift(x, num_copies, cyclic = True, max_shift = 0.1, seed = 42):
         numpy array: shifts of each observation 
     """
     
-    random.seed(seed)
+    # random.seed(seed)
     max_shift_positions = max(1,int(max_shift * len(x)))
     shifts = np.random.randint(0, max_shift_positions, num_copies)
     data = np.zeros((len(x), num_copies))
@@ -121,7 +123,7 @@ def random_noise(x, sigma = 0.1 ,seed = 42):
     Returns:
         numpy array: output signal
     """
-    random.seed(seed)
+    # random.seed(seed)
     noise = np.random.normal(0, sigma, x.shape)
     y = x + noise
     return y
@@ -142,6 +144,23 @@ def power_spectrum(x):
     """
     return abs(x)**2
 
+def circulant(X):
+    X = X.flatten()
+    L = len(X)
+    mat = np.array([np.roll(X,k) for k in range(L)])
+    return mat
+
+def circulantadj(mat):
+    N,M = mat.shape
+    assert N == M
+    A = np.zeros((N, N**2))
+    I = np.identity(N)
+    for n in range(N):
+        en =I[:,n]
+        Cn = circulant(en)
+        A[n,:] = Cn.flatten('F') # flatten in column-major
+    return A @ mat.flatten('F').reshape(-1,1)
+  
 def bispectrum(X):
     """return the bispectrum of a signal
 
@@ -162,7 +181,7 @@ def bispectrum(X):
         output = np.zeros((n,m,m),dtype = 'complex_')
     for i in range(n):
         x = np.array(X)[:,i]
-        mat1 = np.array([np.roll(x,k) for k in range(m)])
+        mat1 = circulant(x)
         mat2 = np.outer(x, np.conjugate(x))
         matmul = mat1 * mat2
         if n == 1 :
@@ -204,7 +223,7 @@ def simulate_data(signal, n_copies = 800, cyclic = False, sigma = 0.1):
     
     return signal_dict
 
-def invariants_from_data(X, sigma = None, debias = False):
+def invariants_from_data(X, sigma = None, debias = False, verbose = False):
     """estimates the invariant features from data by averaging the features over all observations
 
     Args:
@@ -238,7 +257,8 @@ def invariants_from_data(X, sigma = None, debias = False):
     
     B_est = np.mean(bispectrum(X_fft), axis = 0)
     
-    print('time to estimate invariants from data = ', time.time() - start)
+    if verbose:
+        print('time to estimate invariants from data = ', time.time() - start)
     return mean_est, P_est, B_est
 
 def align_to_ref(X, X_ref):
@@ -255,3 +275,19 @@ def align_to_ref(X, X_ref):
     X_aligned = np.roll(X, shift)
     
     return X_aligned
+
+def hess_from_grad(grad):
+    """return the hessian function as the jacobian of a gradient function from autograd. 
+    
+    Args:
+        grad (function): (np array) -> (np array). Gradient of a cost function at a given point x
+
+    Returns: 
+        function: returns the directional derivative of gradient (at point x) in the direction of a tangent vector (y).
+    """
+    def hess(x,y):
+        assert x.shape == y.shape
+        H_f = jacobian(grad)
+        H = H_f(x)
+        return H @ y
+    return hess

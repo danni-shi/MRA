@@ -11,7 +11,7 @@ x = np.arange(5)
 y = np.roll(x,1)
 x_aligned = utils.align_to_ref(x,y)
 
-with open('test.npy', 'rb') as f:
+with open('visual.npy', 'rb') as f:
     X_est = np.load(f)
     signal = np.load(f)
     X0 = np.load(f)
