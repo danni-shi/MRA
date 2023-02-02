@@ -14,7 +14,6 @@ def make_A(L):
 
 def create_cost_function(mean_est, P_est, B_est, sigma, manifold, autograd = True):
     euclidean_gradient = euclidean_hessian = None
-    P_est = np.array(P_est)
     
     if autograd:
         
@@ -61,7 +60,7 @@ def optimise_manopt(data, sigma, X0, extra_inits = 0):
     
     cost, euclidean_gradient, euclidean_hessian = create_cost_function(mean_est, P_est, B_est, sigma, manifold)
     problem = pymanopt.Problem(manifold, cost)
-    optimizer = pymanopt.optimizers.TrustRegions(min_gradient_norm = 1e-7, min_step_size = 1e-15, max_iterations = 1000, verbosity = 2)
+    optimizer = pymanopt.optimizers.TrustRegions(min_gradient_norm = 1e-6, max_iterations = 200)
     result = optimizer.run(problem, initial_point=X0, )
     X_est = result.point
     result_cost = result.cost

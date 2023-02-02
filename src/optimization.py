@@ -23,8 +23,7 @@ def optimise_manopt(data, sigma, X0, extra_inits = 0):
 
     manifold = pymanopt.manifolds.Euclidean(L,1)
     cost, grad, hess = create_cost_function(mean_est, P_est, B_est, sigma, manifold)
-    # problem = pymanopt.Problem(manifold, cost, euclidean_gradient = grad, euclidean_hessian=euclidean_hessian)
-    # grad = None
+    # grad = hess = None
     problem = pymanopt.Problem(manifold, cost, euclidean_gradient=grad, euclidean_hessian=hess)
     optimizer = pymanopt.optimizers.TrustRegions(min_gradient_norm = 1e-7, max_iterations = 50, verbosity = 2)
     # optimizer = pymanopt.optimizers.SteepestDescent(min_step_size=1e-18, max_iterations = 200, verbosity = 2)

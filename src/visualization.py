@@ -11,7 +11,7 @@ x = np.arange(5)
 y = np.roll(x,1)
 x_aligned = utils.align_to_ref(x,y)
 
-with open('visual.npy', 'rb') as f:
+with open('../results/visual.npy', 'rb') as f:
     X_est = np.load(f)
     signal = np.load(f)
     X0 = np.load(f)
@@ -35,7 +35,7 @@ plt.title(f'Circular CCF, best lag = {lag}')
 # plt.axhline(-1.96/np.sqrt(len(ccf)), color='r', ls='--') 
 # plt.axhline(1.96/np.sqrt(len(ccf)), color='r', ls='--')
 
-plt.savefig('ccf')
+plt.savefig('../plots/ccf')
 
 L = len(X_est)
 fig, ax = plt.subplots(figsize = (15,6))
@@ -46,4 +46,4 @@ ax.plot(np.arange(L), X0, label = 'init',linestyle = ':')
 plt.grid()
 plt.legend()
 plt.title('Comparison of the Original and Estimated Signals, adjusted for shifts')
-plt.savefig('estimate_adjusted')
+plt.savefig('../plots/estimate')
