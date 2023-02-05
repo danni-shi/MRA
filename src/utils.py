@@ -261,7 +261,7 @@ def invariants_from_data(X, sigma = None, debias = False, verbose = False):
         print('time to estimate invariants from data = ', time.time() - start)
     return mean_est, P_est, B_est
 
-def align_to_ref(X, X_ref):
+def align_to_ref(X, X_ref, return_ccf = False):
     """align the vector x after circularly shifting it such that it is optimally aligned with X_ref inn 2-norm
 
     Args:
@@ -271,10 +271,13 @@ def align_to_ref(X, X_ref):
     X_ref_fft = np.fft.fft(X_ref)
     X_fft = np.fft.fft(X)
     ccf = np.fft.ifft(X_fft.conj() * X_ref_fft).real
-    shift = np.argmax(ccf)
-    X_aligned = np.roll(X, shift)
+    lag = np.argmax(ccf)
+    X_aligned = np.roll(X, lag)
     
-    return X_aligned
+    if return_ccf:
+        return X_aligned, lag, ccf/np.linalg.norm(X_ref)/np.linalg.norm(X)
+    else:
+        return X_aligned, lag
 
 def hess_from_grad(grad):
     """return the hessian function as the jacobian of a gradient function from autograd. 

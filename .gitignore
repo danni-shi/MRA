@@ -1,0 +1,6 @@
+# ignore files
+# https://git-scm.com/docs/gitignore
+plots/
+*.csv
+.vscode/
+

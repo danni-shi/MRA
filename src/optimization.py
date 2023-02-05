@@ -7,7 +7,7 @@ import pymanopt.optimizers
 
 import utils
 
-def optimise_manopt(data, sigma, X0, extra_inits = 0):
+def optimise_manopt(data, sigma, X0 = None, extra_inits = 0):
     assert isinstance(extra_inits, int)
     L, N = data.shape
     mean_est, P_est, B_est = utils.invariants_from_data(data)
@@ -28,8 +28,9 @@ def optimise_manopt(data, sigma, X0, extra_inits = 0):
     optimizer = pymanopt.optimizers.TrustRegions(min_gradient_norm = 1e-7, max_iterations = 50, verbosity = 2)
     # optimizer = pymanopt.optimizers.SteepestDescent(min_step_size=1e-18, max_iterations = 200, verbosity = 2)
     # optimizer = pymanopt.optimizers.NelderMead()
-    if X0.ndim == 1:
-        X0 = X0.reshape(-1,1)
+    if X0: 
+        if X0.ndim == 1:
+            X0 = X0.reshape(-1,1)
     result = optimizer.run(problem, initial_point=X0)
     # result = optimizer.run(problem)
     X_est = result.point
