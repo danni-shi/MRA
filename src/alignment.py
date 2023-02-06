@@ -7,7 +7,7 @@ def get_signal(type, L):
     if type == 'logreturns':
         with open('../../data/logreturn.npy', 'rb') as f:
             signal = np.load(f)
-        signal = signal[:L]      
+        signal = signal[L:2*L]      
     elif type == 'sine':
         x = np.linspace(0,2*np.pi, L)
         x = np.sin(x)
@@ -15,7 +15,6 @@ def get_signal(type, L):
     elif type == 'gaussian':
         signal = np.random.randn(L)
     return signal  
-
 
 sigma = 1 # std of random gaussian noise
 max_shift= 0.3 # max proportion of lateral shift
@@ -45,10 +44,10 @@ def eval_alignment(type, sigma, L):
     return mean_error, accuracy
 
 L = 50
-n = 10 # number of points
+n = 28 # number of points
 error_list = np.zeros((n,len(options)))
 acc_list = np.zeros((n,len(options)))
-sigma_range = np.linspace(1,3,n)
+sigma_range = np.linspace(0.6,3,n)
 for i in range(len(options)):
     type = options[i]
     for j in range(n):
