@@ -7,22 +7,21 @@ abspath = os.path.abspath(__file__)
 dname = os.path.dirname(abspath)
 os.chdir(dname)
 
-x = np.arange(5)
-y = np.roll(x,1)
-x_aligned = utils.align_to_ref(x,y)
-
 with open('../results/visual.npy', 'rb') as f:
     X_est = np.load(f)
     X_aligned = np.load(f)
     signal = np.load(f)
     X0 = np.load(f)
+    p_true = np.load(f)
+    p_est = np.load(f)
 
 
 # X_est = X_est.flatten()
 
 # use convolution theorem https://en.wikipedia.org/wiki/Cross-correlation
 # X_est_shifted, lag, ccf = utils.align_to_ref(X_est, signal, return_ccf = True)
-
+print(f'true prob: {p_true}')
+print(f'estimated prob: {p_est}')
 L, K = X_aligned.shape
 plt.rcParams['text.usetex'] = True
 fig, axes = plt.subplots(nrows = K, ncols = 1, figsize = (15,6), squeeze=False)
@@ -31,8 +30,9 @@ for i in range(K):
     ax[i].plot(np.arange(L),signal[:,i], label = 'true')
     ax[i].plot(np.arange(L), X_aligned[:,i], label = 'estimate',linestyle = '--')
     ax[i].grid()
-plt.legend()
-plt.title('Comparison of the Original and Estimated Signals, adjusted for shifts')
+    ax[i].legend()
+    ax[i].set_title(f'true prob: {p_true[i]:.2f}; estimated prob: {p_est[i]:.2f}')
+fig.suptitle('Comparison of the Original and Estimated Signals, adjusted for shifts')
 plt.savefig('../plots/estimate')
 
 

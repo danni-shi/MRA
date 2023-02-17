@@ -7,7 +7,7 @@ import pymanopt.optimizers
 
 import utils
 
-def optimise_manopt(data, sigma, X0 = None, extra_inits = 0):
+def optimise_manopt(data, sigma, K, XP0 = None, extra_inits = 0):
     assert isinstance(extra_inits, int)
     L, N = data.shape
     mean_est, P_est, B_est = utils.invariants_from_data(data)
@@ -20,17 +20,20 @@ def optimise_manopt(data, sigma, X0 = None, extra_inits = 0):
     #     B_est = np.load(f)  
     # L = len(X0)
     # assert L > 1
-
-    manifold = pymanopt.manifolds.Euclidean(L,1)
+    if XP0 is not None:
+        assert (XP0[0].shape == (L,K)) & (XP0[1].shape == (K,)), 'Initial point dimension is wrong'
+        if XP0[0].ndim == 1:
+            XP0[0] = XP0[0].reshape(-1,1)
+        XP0 = (XP0[0], np.sqrt(XP0[1]))
+    X_manifold = pymanopt.manifolds.Euclidean(L,K)
+    p_manifold = pymanopt.manifolds.Sphere(K)
+    manifold = pymanopt.manifolds.Product((X_manifold,p_manifold))
     cost, grad, hess = create_cost_function(mean_est, P_est, B_est, sigma, manifold)
-    # grad = hess = None
+    # hess = None
     problem = pymanopt.Problem(manifold, cost, euclidean_gradient=grad, euclidean_hessian=hess)
     optimizer = pymanopt.optimizers.TrustRegions(min_gradient_norm = 1e-7, max_iterations = 50, verbosity = 2)
-    if X0 is not None : 
-        if X0.ndim == 1:
-            X0 = X0.reshape(-1,1)
-    result = optimizer.run(problem, initial_point=X0)
-    X_est = result.point
+    result = optimizer.run(problem, initial_point=XP0)
+    Xp_est = result.point
     result_cost = result.cost
     
     if extra_inits > 0:
@@ -38,9 +41,9 @@ def optimise_manopt(data, sigma, X0 = None, extra_inits = 0):
             result = optimizer.run(problem)
             if result.cost < result_cost:
                 result_cost = result.cost
-                X_est = result.point
+                Xp_est = result.point
             
-    return X_est
+    return Xp_est[0], Xp_est[1]**2
 
 
 
@@ -48,7 +51,8 @@ def create_cost_function(mean_est, P_est, B_est, sigma, manifold):
     euclidean_gradient = euclidean_hessian = None
     
     @pymanopt.function.autograd(manifold)
-    def cost(X):
+    def cost(X,sqrt_p): 
+        p = sqrt_p**2
         if X.ndim == 1:
             X = X.reshape(-1,1)
         L, K = X.shape
@@ -56,15 +60,15 @@ def create_cost_function(mean_est, P_est, B_est, sigma, manifold):
         A = make_A(L)
         
         # limits
-        M1 = np.mean(X)
-        M2 = abs(FX)**2 + L * sigma**2 * np.ones((L,K))
+        M1 = np.mean(np.dot(X, p))
+        M2 = np.dot(abs(FX)**2, p) + L * sigma**2 * np.ones((L))
         M3 = mean_est * (sigma**2) * (L**2) * A
         # matmul = np.zeros((L,L,K))
         for k in range(K):
             y =FX[:,k]
             mat1 = utils.circulant(y)
             mat2 = np.outer(y, np.conjugate(y))
-            M3 = M3 + mat1 * mat2
+            M3 = M3 + p[k] * mat1 * mat2
             
         M3_min_Best = M3 - B_est
         
@@ -77,14 +81,15 @@ def create_cost_function(mean_est, P_est, B_est, sigma, manifold):
         # assert M2.shape == P_est.shape
         f = scale * 0.5 * \
             (a1*(M1-mean_est)**2 + \
-                a2*np.linalg.norm(M2.flatten() - P_est)**2 + \
+                a2*np.linalg.norm(M2 - P_est)**2 + \
                     a3*np.linalg.norm(M3_min_Best, 'fro')**2 
             )
                 
         return f
     
     @pymanopt.function.numpy(manifold)
-    def grad(X):
+    def grad(X, sqrt_p):
+        p = sqrt_p**2
         if X.ndim == 1:
             X = X.reshape(-1,1)
         L, K = X.shape
@@ -92,14 +97,16 @@ def create_cost_function(mean_est, P_est, B_est, sigma, manifold):
         A = make_A(L)
         
         # limits
-        M1 = np.mean(X)
-        M2 = abs(FX)**2 + L * sigma**2 * np.ones((L,K))
+        M1 = np.mean(np.dot(X, p))
+        M2 = np.dot(abs(FX)**2, p) + L * sigma**2 * np.ones((L))
         M3 = mean_est * (sigma**2) * (L**2) * A
+        matmul = []
         for k in range(K):
             y =FX[:,k]
             mat1 = utils.circulant(y)
-            mat2 = np.outer(y, np.conjugate(y)) 
-            M3 += mat1 * mat2
+            mat2 = np.outer(y, np.conjugate(y))
+            matmul.append(mat1 * mat2)
+            M3 = M3 + p[k] * mat1 * mat2
             
         M3_min_Best = M3 - B_est
     
@@ -107,31 +114,56 @@ def create_cost_function(mean_est, P_est, B_est, sigma, manifold):
         a1 = L**2
         a2 = 1/(L*(2+sigma**2) )
         a3 = 1/(L**2*(3+sigma**4))
-        gradX = (a1/L) * (M1 - mean_est) * np.ones((L,K)) + \
-            2 * L * a2 * np.fft.ifft((M2-P_est.reshape(-1,1))*FX, axis = 0) 
-        grad_list = []
-        test_gradX = gradX.flatten()
+        gradX = (a1/L) * (M1 - mean_est) * np.outer(np.ones(L), p) + \
+            2 * L * a2 * np.fft.ifft(np.outer((M2-P_est), p)*FX, axis = 0) 
+        gradp = (a1/L) * (M1 - mean_est) * np.sum(X, axis = 0) + \
+            a2 * np.dot(np.transpose(abs(FX)**2), (M2-P_est))
+        gradX_list = []
+        gradp_list = []
+        
+        # test_gradX = gradX.flatten()
         for k in range(K):
             vec = gradX[:,k]
-            vec = vec + a3 * DBx_adj(FX, M3_min_Best)
-            grad_list.append(vec.reshape(-1,1))
-        gradX = np.concatenate(grad_list, axis = 1)
-        # simple test for K = 1
-        test_gradX = test_gradX + a3 * DBx_adj(FX, M3_min_Best)
-        assert np.linalg.norm(test_gradX - gradX.flatten()) < 1e-6
-        scale = 3 + sigma**4
+            point = gradp[k]
+            
+            vec = vec + a3 * DBx_adj(FX[:,k], M3_min_Best)
+            point = point + a3 * np.sum(np.real(M3_min_Best * matmul[k]))
+            
+            gradX_list.append(vec.reshape(-1,1))
+            gradp_list.append(point)
+        
+        scale = 3 + sigma**4    
+        gradX = np.concatenate(gradX_list, axis = 1)
         gradX = scale * np.real(gradX)
+        gradp = scale * np.array(gradp_list)  * 2 * sqrt_p
+        # simple test for K = 1
+        # test_gradX = test_gradX + a3 * DBx_adj(FX, M3_min_Best)
+        # assert np.linalg.norm(test_gradX - gradX.flatten()) < 1e-6
+        
+        
+        
+        grad = (gradX, gradp)
         # gradX = manifold.euclidean_to_riemannian_gradient(X, gradX)
         # print('used defined grad')
-        return gradX
+        return grad
     
     @pymanopt.function.numpy(manifold)
-    def hess(X,y):
-        assert X.shape == y.shape
-        grad_f = lambda x: grad(x).flatten()
-        H = jacobian(grad_f)(X.flatten())
+    def hess(X, sqrt_p, yX, ysqrtp):
+        # X = Xp[0]
+        # p = Xp[1]
+        assert X.shape == yX.shape
+        assert sqrt_p.shape == ysqrtp.shape
+        # gradXp = lambda x, p: grad(x, p)
+        # grad_f = lambda x: grad(x).flatten()
+        # H = jacobian(grad_f)(X.flatten())
+        gradX = lambda x: grad(x, sqrt_p)[0]
+        gradp = lambda p: grad(X, p)[1]
+        Hp = jacobian(gradp)(sqrt_p)
+        HX = jacobian(gradX)(X)
+        
+        hessian = (np.tensordot(HX, yX, 2), Hp @ ysqrtp)
         # print('used defined hess')
-        return H @ y
+        return hessian
     
     return cost, grad, hess
 
@@ -142,7 +174,8 @@ def make_A(L):
     return A
     
 def DBx_adj(y, W):
-    y = y.reshape(-1,1)
+    if y.ndim == 1:
+        y = y.reshape(-1,1)
     L = y.shape[0]   
     H = W * utils.circulant(np.conjugate(y))
     y_prime = np.conjugate(np.transpose(y))

@@ -15,13 +15,15 @@ def pairwise_align(observations):
         np array: the i,j th element represents the lag k such that corr(Xi(t), Xj(t+k)) is maximum. i.e. shifting Xi rightwards by k timescales leads to the best alignment.
     """
     L, M = observations.shape
-    lag_matrix = np.eye(M)
-    for m in range(M):
-        for i in range(1,m):
-            _, lag = utils.align_to_ref(observations[:,i], observations[:,m])    
+    lag_matrix = np.zeros((M,M))
+    for j in range(M):
+        for i in range(1,j):
+            lag = np.argmax((np.correlate(observations[:,i], observations[:,j], 'full'))[L-1:])
             if lag > L//2 + 1:
                 lag -= L
-            lag_matrix[i,m] = lag
+            lag_matrix[i,j] = lag
+            lag_matrix[i,j] = -lag
+                   
     return lag_matrix
 
 with open('../results/data.npy', 'rb') as f:

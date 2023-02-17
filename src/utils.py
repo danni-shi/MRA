@@ -7,7 +7,7 @@ import numpy as np
 import autograd.numpy as np
 from autograd import elementwise_grad as egrad
 from autograd import jacobian
-
+from scipy.optimize import linear_sum_assignment
 
 def get_dataset(type, ticker, date, nlevels, start = '34200000', end = '57600000'):
     """ Return LOBSTER intra-day dataset based on the default naming style
@@ -84,7 +84,7 @@ def seconds_to_time(second, date = '2012-06-21'):
     return time
 
 def random_shift(x, num_copies, cyclic = True, max_shift = 0.1, seed = 42):
-    """_summary_
+    """ create shifted copies of given signal
 
     Args:
         x (numpy array): input signal
@@ -98,9 +98,8 @@ def random_shift(x, num_copies, cyclic = True, max_shift = 0.1, seed = 42):
         numpy array: shifts of each observation 
     """
     
-    # random.seed(seed)
     max_shift_positions = max(1,int(max_shift * len(x)))
-    shifts = np.random.randint(0, max_shift_positions, num_copies)
+    shifts = np.random.randint(0, max_shift_positions + 1, num_copies)
     data = np.zeros((len(x), num_copies))
     
     for i in range(num_copies):
@@ -112,6 +111,29 @@ def random_shift(x, num_copies, cyclic = True, max_shift = 0.1, seed = 42):
         data[:,i] = y
     return data, shifts
 
+def random_shift_het(X, num_copies, cyclic = True, max_shift = 0.1, seed = 42):
+    L,K = X.shape
+    assert K == len(num_copies)
+    M = int(sum(num_copies))
+    cumsum = np.append([0],np.cumsum(num_copies)).astype(int)
+    data = np.zeros((L,M))
+    shifts = np.zeros(M)
+    classes = np.zeros(M)
+    for k in range(K):
+        x = X[:,k]
+        m = num_copies[k]
+        # fill the zeros array from left to right
+        r = range(cumsum[k],cumsum[k+1])
+        data[:,r], shifts[r] = random_shift(x,m,cyclic,max_shift,seed)
+        classes[r] = k
+    # permute the data
+    perm = np.random.permutation(M)
+    data = data[:,perm]
+    shifts = shifts[perm]
+    classes = classes[perm]
+    
+    return data, shifts, classes
+    
 def random_noise(x, sigma = 0.1 ,seed = 42):
     """add iid gaussian noise to a signal
 
@@ -132,6 +154,11 @@ def generate_data(x, num_copies, max_shift = 0.1, sigma = 0.1, cyclic = True, se
     data, shifts = random_shift(x, num_copies, cyclic, max_shift, seed)
     data = random_noise(data, sigma, seed)
     return data, shifts
+
+def generate_data_het(x, num_copies, max_shift = 0.1, sigma = 0.1, cyclic = True, seed = 42):
+    data, shifts, classes = random_shift_het(x, num_copies, cyclic, max_shift, seed)
+    data = random_noise(data, sigma, seed)
+    return data, shifts, classes
 
 def power_spectrum(x):
     """return the power spectrum of a signal
@@ -261,23 +288,88 @@ def invariants_from_data(X, sigma = None, debias = False, verbose = False):
         print('time to estimate invariants from data = ', time.time() - start)
     return mean_est, P_est, B_est
 
+def invariants_from_data_het(X, w = None, sigma = None, debias = False, verbose = False):
+    """estimates the invariant features from data by averaging the features over all observations, when number of classes K >= 1
+
+    Args:
+        X (numpy array): L x N, each column contains an observation
+        debias(bool): whether the estimates are debiased
+        
+    Returns:
+        mean_est(float): estimate of the mean of the signal
+        
+    """
+    
+    start = time.time()
+    if X.ndim == 1:
+        X = X.reshape(-1,1)
+        
+    L, N = X.shape
+    if  w is None:
+        w = np.ones(N)/N
+        
+    mean_est = X.mean().mean()
+    
+    if debias:
+        X = X - mean_est
+        
+    X_fft = np.fft.fft(X, axis = 0)
+    
+    P = np.apply_along_axis(power_spectrum, 0, X_fft)
+    P_est = np.mean(P, axis = 1)
+    
+    if debias:
+        if sigma == None:
+            sigma = np.std(X.sum(axis =2))/np.sqrt(L)
+        P_est = max(0, P_est - L*sigma**2)
+    
+    B_est = np.mean(bispectrum(X_fft), axis = 0)
+    
+    if verbose:
+        print('time to estimate invariants from data = ', time.time() - start)
+    return mean_est, P_est, B_est
+
 def align_to_ref(X, X_ref, return_ccf = False):
-    """align the vector x after circularly shifting it such that it is optimally aligned with X_ref inn 2-norm
+    """align the vector x after circularly shifting it such that it is optimally aligned with X_ref in 2-norm
 
     Args:
         X (np array): vector to align
         X_ref (np array): reference vector 
     """
+    X_ref = X_ref.flatten()
+    X = X.flatten()
+    
     X_ref_fft = np.fft.fft(X_ref)
     X_fft = np.fft.fft(X)
-    ccf = np.fft.ifft(X_fft.conj() * X_ref_fft).real
+    ccf = np.fft.ifft(X_ref_fft.conj() * X_fft).real
     lag = np.argmax(ccf)
-    X_aligned = np.roll(X, lag)
+    X_aligned = np.roll(X, -lag)
     
     if return_ccf:
         return X_aligned, lag, ccf/np.linalg.norm(X_ref)/np.linalg.norm(X)
     else:
         return X_aligned, lag
+
+def align_to_ref_het(X, X_ref):
+    """permuted and circularly shifted (individually) to match xref as closely as possible (in some sense defined by the code.
+
+    Args:
+        X (np array): L x K. Each column contains a signal recovered from data
+        X_ref (np array): L x K. Each column contains a true signal
+    """
+    assert X.shape == X_ref.shape
+    
+    L, K =  X.shape
+    dist_mat = np.zeros((K,K))
+    for k1 in range(K):
+        for k2 in range(K):
+            dist_mat[k1,k2] = np.linalg.norm(align_to_ref(X[:,k2], X_ref[:,k1])[0]- X_ref[:,k1])**2
+    row_ind, col_ind = linear_sum_assignment(dist_mat)
+    X_aligned = X[:, col_ind]
+    for k in range(K):
+        X_aligned[:,k] = align_to_ref(X_aligned[:,k], X_ref[:,k])[0]
+        
+    return X_aligned, col_ind
 
 def hess_from_grad(grad):
     """return the hessian function as the jacobian of a gradient function from autograd. 
