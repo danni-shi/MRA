@@ -14,7 +14,7 @@ dname = os.path.dirname(abspath)
 os.chdir(dname)
 
 L = 50
-K = 3
+K = 1
 # option: sine wave, random gaussian, log returns
 options = ['logreturns', 'sine', 'gaussian']
 
@@ -40,23 +40,20 @@ if synthetic_data:
     signal = (x-np.mean(x, axis = 0))/np.std(x, axis = 0) # the division is along axis 0
     
     # ground truth mixing probabilities
-
-    p_true = np.ones(K)
-    p_true += np.random.uniform(-0.3,0.3, K)
-    # p_true = np.maximum(0.5/K, p_true)
+    p_true = np.random.randn(K)
+    p_true = np.maximum(0.2/K, p_true)
     p_true = p_true/sum(p_true)
-    # p_true = np.array([0.6,0.4])
     assert sum(p_true) - 1 < 1e-10
     
     # set parameters for generating observations
     sigma = 0.1
-    max_shift= 0.2
+    max_shift= 0.1
     M = 10000
     Ms = np.round(p_true*M).astype(int)
     
     # generate shifted, noisy version of the signal
     start = time.time()
-    observations, shifts, classes = utils.generate_data_het(signal, Ms,  max_shift, sigma, cyclic = False)
+    observations, shifts, classes = utils.generate_data_het(signal, Ms,  max_shift, sigma, cyclic = True)
     print('time to generate data = ', time.time() - start)
 
     # save observations
@@ -76,28 +73,21 @@ else:
 L = len(observations)
 np.random.seed(42)
 X0 = np.random.randn(L, K)
-X_est = optimization_het.optimise_manopt(observations, sigma, p_true, X0, extra_inits=0)
+P0 = np.random.uniform(size = K)
+P0 = P0/np.sum(P0)
+X_est, p_est = optimization_het.optimise_manopt(observations, sigma, K= K, XP0=(X0,p_true), extra_inits=0)
 
 # align the estimate to original signal    
 X_aligned, perm = utils.align_to_ref_het(X_est,signal)
+p_aligned = p_est[perm]
 print(f'relative error of signal =  {np.linalg.norm(X_aligned-signal)/np.linalg.norm(signal):.5f}')
-
-# plot
-plt.rcParams['text.usetex'] = True
-fig, axes = plt.subplots(nrows = K, ncols = 1, figsize = (15,6*K), squeeze=False)
-ax = axes.flatten()
-for i in range(K):
-    ax[i].plot(np.arange(L),signal[:,i], label = 'true')
-    ax[i].plot(np.arange(L), X_aligned[:,i], label = 'estimate',linestyle = '--')
-    ax[i].grid()
-    ax[i].legend()
-    ax[i].set_title(f'relative error of signal =  {np.linalg.norm(X_aligned[:,i]-signal[:,i])/np.linalg.norm(signal[:,i]):.5f}; proportion in sample = {p_true[i]:.5f}')
-fig.suptitle('Comparison of the Original and Estimated Signals, adjusted for shifts')
-plt.savefig('../plots/estimate')
-
+print(f'relative error of probabilities = {np.linalg.norm(p_aligned-p_true)/np.linalg.norm(p_true):.5f}')
+print('prob: ', p_aligned)
+    
 with open('../results/visual.npy', 'wb') as f:
     np.save(f, X_est)
     np.save(f, X_aligned)
     np.save(f, signal)
     np.save(f,X0)
     np.save(f, p_true)
+    np.save(f, p_aligned)

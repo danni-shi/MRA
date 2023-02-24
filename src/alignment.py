@@ -3,7 +3,12 @@ import matplotlib.pyplot as plt
 import utils
 import optimization
 import pickle
+import time
+from tqdm import tqdm
+import scipy.io as spio
 
+    
+    
 def get_signal(type, L):
     if type == 'logreturns':
         with open('../../data/logreturn.npy', 'rb') as f:
@@ -60,7 +65,7 @@ def get_lag_matrix(observations, ref = None):
 
 
 
-def eval_alignment(observations, shifts, sigma):
+def eval_alignment(observations, shifts, sigma, X_est = None):
     """compare the performance of lead-lag predition using intermidiate latent signal to naive pairwise prediciton
 
     Args:
@@ -77,8 +82,9 @@ def eval_alignment(observations, shifts, sigma):
     L, N = observations.shape
     lag_mat_true = lag_vec_to_mat(shifts)
     
-    # estimate and align to signal
-    X_est = optimization.optimise_manopt(observations, sigma)
+    if X_est is None:
+        # estimate and align to signal
+        X_est = optimization.optimise_manopt(observations, sigma)
     
     # calculate lags of observation to the aligned estimate
     lag_mat = get_lag_matrix(observations, X_est)
@@ -92,6 +98,8 @@ def eval_alignment(observations, shifts, sigma):
     accuracy_0 = np.mean(abs(lag_mat_0 - lag_mat_true)< 0.1) * 100
     
     return mean_error, accuracy, mean_error_0, accuracy_0, X_est
+
+
 
 def align_plot():
     # intialise parameters for generating observations
@@ -157,32 +165,107 @@ def align_plot():
     with open('../results/alignment.pkl', 'wb') as f:   
         pickle.dump(result, f)
 
-np.random.seed(42)
+
+
+### plot error and accuracy with data and results from MATLAB
+
+# intialise parameters
+sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise
+max_shift= 0.1 # max proportion of lateral shift
+options = ['gaussian'] # types of signals
+K_range = [1]
+n = 100 # number of observations we evaluate
+
+# data path
+data_path = '/Users/caribbeanbluetin/Desktop/Research/MRA_LeadLag/HeterogeneousMRA/data/'
+count = 0
+result = {}
+type = options[0]
+for k in K_range:
+    # iniitialise containers
+    result[type] = {}
+    error_list = []
+    acc_list = []
+    error_list_0 = []
+    acc_list_0 = []
+    
+    for sigma in tqdm(sigma_range):
+        # read data produced by matlab
+        observations_path = data_path + '_'.join(['observations', 
+                                      'noise'+str(sigma), 
+                                      'shift'+str(max_shift), 
+                                      'class'+str(k)+'.mat'])
+        results_path = data_path + '_'.join(['results', 
+                                      'noise'+str(sigma), 
+                                      'shift'+str(max_shift), 
+                                      'class'+str(k)+'.mat'])
+        observations_mat = spio.loadmat(observations_path)
+        results_mat = spio.loadmat(results_path)
+        observations = observations_mat['data'][:n]
+        shifts = observations_mat['shifts'][:n]
+        X_est = results_mat['x_est']
+        
+        mean_error, accuracy, mean_error_0, accuracy_0, X_est = \
+            eval_alignment(observations, shifts, sigma, X_est)
+        # X_aligned, lag = utils.align_to_ref(X_est, signal)
+        # print('relative error = ', np.linalg.norm(X_aligned-signal)/np.linalg.norm(signal))
+        error_list.append(mean_error)
+        acc_list.append(accuracy)
+        error_list_0.append(mean_error_0)
+        acc_list_0.append(accuracy_0)
+        
+        # print(f'{count}/{n*len(options)} steps completed')
+    result[type]['accuracy'] = {'intermediate': acc_list,
+                                'pairwise': acc_list_0}        
+    result[type]['error'] = {'intermediate': error_list,
+                                'pairwise': error_list_0}        
+    
+    fig, ax = plt.subplots(figsize = (15,6))
+    ax.plot(sigma_range, error_list, label = 'with intermediate')
+    ax.plot(sigma_range, error_list_0, label = 'pairwise')
+    plt.grid()
+    plt.legend()
+    plt.title(f'Change of Alignment Error with Noise Level ({type} signal)')
+    plt.savefig(f'../plots/align_error_{type}')
+
+    fig, ax = plt.subplots(figsize = (15,6))
+    ax.plot(sigma_range, acc_list, label = 'with intermediate')
+    ax.plot(sigma_range, acc_list_0, label = 'pairwise')
+    plt.grid()
+    plt.legend()
+    plt.title(f'Change of Alignment Accuracy with Noise Level ({type} signal)')
+    plt.savefig(f'../plots/align_acc_{type}')
+
+with open('../results/alignment.pkl', 'wb') as f:   
+    pickle.dump(result, f)
+    
+    
+    
 # L = 50 # length of signal
 # N = 500 # number of copies
 # sigma = 1 # std of random gaussian noise
 # max_shift= 0.1
 # signal = get_signal('sine', L)
 
-with open('../results/data.npy', 'rb') as f:
-    observations = np.load(f)
-    shifts = np.load(f)
+# with open('../results/data.npy', 'rb') as f:
+#     observations = np.load(f)
+#     shifts = np.load(f)
     
-with open('../results/visual.npy', 'rb') as f:
-    X_est = np.load(f)
-    X_aligned = np.load(f)
+# with open('../results/visual.npy', 'rb') as f:
+#     X_est = np.load(f)
+#     X_aligned = np.load(f)
 
-# calculate lags of observation to the aligned estimate
-lag_mat = get_lag_matrix(observations, X_est)
-lag_mat_0 = get_lag_matrix(observations)
-lag_mat_true = lag_vec_to_mat(shifts)
+# # calculate lags of observation to the aligned estimate
+# lag_mat = get_lag_matrix(observations, X_est)
+# lag_mat_0 = get_lag_matrix(observations)
+# lag_mat_true = lag_vec_to_mat(shifts)
 
-# evaluate error and accuracy
-mean_error = np.linalg.norm(lag_mat - lag_mat_true)/np.linalg.norm(lag_mat_true)
-accuracy = np.mean(abs(lag_mat - lag_mat_true) < 0.1) * 100
-mean_error_0 = np.linalg.norm(lag_mat_0 - lag_mat_true)/np.linalg.norm(lag_mat_true)
-accuracy_0 = np.mean(abs(lag_mat_0 - lag_mat_true)< 0.1) * 100
+# # evaluate error and accuracy
+# mean_error = np.linalg.norm(lag_mat - lag_mat_true)/np.linalg.norm(lag_mat_true)
+# accuracy = np.mean(abs(lag_mat - lag_mat_true) < 0.1) * 100
+# mean_error_0 = np.linalg.norm(lag_mat_0 - lag_mat_true)/np.linalg.norm(lag_mat_true)
+# accuracy_0 = np.mean(abs(lag_mat_0 - lag_mat_true)< 0.1) * 100
 
-print(f'accuracy of lag predictions: experiment: {accuracy:.2f}%; benchmark: {accuracy_0:.2f}%')
-print(f'relative error of lag predictions: experiment: {mean_error:.2f}; benchmark: {mean_error_0:.2f}')
+# print(f'accuracy of lag predictions: experiment: {accuracy:.2f}%; benchmark: {accuracy_0:.2f}%')
+# print(f'relative error of lag predictions: experiment: {mean_error:.2f}; benchmark: {mean_error_0:.2f}')
 

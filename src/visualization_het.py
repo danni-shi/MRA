@@ -13,7 +13,7 @@ with open('../results/visual.npy', 'rb') as f:
     signal = np.load(f)
     X0 = np.load(f)
     p_true = np.load(f)
-    p_est = np.load(f)
+    # p_est = np.load(f)
 
 
 # X_est = X_est.flatten()
@@ -21,17 +21,19 @@ with open('../results/visual.npy', 'rb') as f:
 # use convolution theorem https://en.wikipedia.org/wiki/Cross-correlation
 # X_est_shifted, lag, ccf = utils.align_to_ref(X_est, signal, return_ccf = True)
 print(f'true prob: {p_true}')
-print(f'estimated prob: {p_est}')
+# print(f'estimated prob: {p_est}')
 L, K = X_aligned.shape
 plt.rcParams['text.usetex'] = True
-fig, axes = plt.subplots(nrows = K, ncols = 1, figsize = (15,6), squeeze=False)
+fig, axes = plt.subplots(nrows = K, ncols = 1, figsize = (15,6*K), squeeze=False)
 ax = axes.flatten()
 for i in range(K):
     ax[i].plot(np.arange(L),signal[:,i], label = 'true')
     ax[i].plot(np.arange(L), X_aligned[:,i], label = 'estimate',linestyle = '--')
     ax[i].grid()
     ax[i].legend()
-    ax[i].set_title(f'true prob: {p_true[i]:.2f}; estimated prob: {p_est[i]:.2f}')
+    # ax[i].set_title(f'true prob: {p_true[i]:.2f}; estimated prob: {p_est[i]:.2f}')
+    ax[i].set_title(f'relative error of signal =  \
+                    {np.linalg.norm(X_aligned[:,i]-signal[:,i])/np.linalg.norm(signal[:,i]):.5f}; proportion in sample = {p_true[i]:.5f}')
 fig.suptitle('Comparison of the Original and Estimated Signals, adjusted for shifts')
 plt.savefig('../plots/estimate')
 
