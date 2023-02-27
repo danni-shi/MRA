@@ -51,7 +51,7 @@ if synthetic_data:
     # set parameters for generating observations
     sigma = 0.1
     max_shift= 0.2
-    M = 10000
+    M = 1000
     Ms = np.round(p_true*M).astype(int)
     
     # generate shifted, noisy version of the signal
