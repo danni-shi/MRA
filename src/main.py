@@ -1,75 +1,86 @@
-import datetime as dt
-import autograd.numpy as np
-#import numpy as np
-import pandas as pd
-from matplotlib import pyplot as plt, dates
-import os
-import time
+"""compare clustering performance of heterogeneous optimization of MRA and spectral clustering;
+Compare the accuracy of lag recovery between the two methods
+"""
+
+import numpy as np
+import pickle
+import matplotlib.pyplot as plt
+import seaborn as sns
+from tqdm import tqdm
+
+from sklearn.cluster import SpectralClustering, KMeans
+from sklearn.metrics.cluster import adjusted_rand_score
+import scipy.io as spio
+from scipy.linalg import block_diag
 
 import utils
 import optimization
 
-abspath = os.path.abspath(__file__)
-dname = os.path.dirname(abspath)
-os.chdir(dname)
+# intialise parameters
+sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise
+max_shift= 0.1 # max proportion of lateral shift
+K_range = [2,3,4]
+n = 2000 # number of observations we evaluate
 
-# option: sine wave, random gaussian, log returns
-options = ['logreturns', 'sine', 'gaussian']
-L = 5
-synthetic_data = 'logreturns'
-if synthetic_data:
-    assert options.count(synthetic_data) > 0, f'{synthetic_data} is not an option'
+# data path
+data_path = '/Users/caribbeanbluetin/Desktop/Research/MRA_LeadLag/HeterogeneousMRA/data/'
+count = 0
+result = {}
+for k in K_range:
+    # iniitialise containers
+    ARI_list = []
+    ARI_list_spc = []
     
-    if synthetic_data == 'logreturns':
-        with open('../../data/logreturn.npy', 'rb') as f:
-            x = np.load(f)
-        x = x[:L]
-        signal = (x-np.mean(x))/np.std(x)
-    elif synthetic_data == 'sine':
-        x = np.linspace(0,np.pi, L)
-        x = np.sin(x)
-        signal = (x-np.mean(x))/np.std(x)
-    elif synthetic_data == 'gaussian':
-        signal = np.random.randn(L)
+    for sigma in tqdm(sigma_range):
+        # read data produced by matlab
+        observations_path = data_path + '_'.join(['observations', 
+                                      'noise'+f'{sigma:.2g}', 
+                                      'shift'+str(max_shift), 
+                                      'class'+str(k)+'.mat'])
+        results_path = data_path + '_'.join(['results', 
+                                      'noise'+f'{sigma:.2g}', 
+                                      'shift'+str(max_shift), 
+                                      'class'+str(k)+'.mat'])
+        observations_mat = spio.loadmat(observations_path)
+        results_mat = spio.loadmat(results_path)
+        observations = observations_mat['data'][:,:n]
+        shifts = observations_mat['shifts'][:n].flatten()
+        classes_true = observations_mat['classes'][:n].flatten()
+        X_est = results_mat['x_est']
+        
+        # baseline clustering method
 
-    # set parameters for generating observations
-    num_copies = 10000
-    sigma = 0.1
-    max_shift= 0.1
-    M = num_copies
-    # generate shifted, noisy version of the signal
-#     start = time.time()
-#     observations, shifts = utils.generate_data(signal, num_copies,  max_shift, sigma, cyclic = False)
-#     print('time to generate data = ', time.time() - start)
+        residuals, lags = utils.residual_lag_mat(observations)
+        delta = 1
+        affinity_matrix = np.exp(- residuals ** 2 / (2. * delta ** 2))
 
-#     # save observations
-#     with open('../results/data.npy', 'wb') as f:
-#         np.save(f, observations)
-#         np.save(f, shifts)
-# else:
-#     path = '../../data/OPCL_20000103_20201231.csv'
-#     data = pd.read_csv(path, index_col=0)
-#     tickers = ['XLF','XLB','XLK','XLV','XLI','XLU','XLY','XLP','XLE']
-#     data = data.iloc[:L].dropna(axis = 0)
-#     data = np.array(data).transpose()
-#     observations = (data-np.mean(data, axis = 0))/np.std(data, axis = 0)
-
-# optimization
-with open('../results/data.npy', 'rb') as f:
-    observations = np.load(f)
-    shifts = np.load(f)
-L = len(observations)
-np.random.seed(42)
-X0 = np.random.normal(0, 1, L)
-X_est = optimization.optimise_manopt(observations, sigma, X0, extra_inits=0)
-
-# align the estimate to original signal    
-X_aligned, lag = utils.align_to_ref(X_est.flatten(),signal)
-print('relative error = ', np.linalg.norm(X_aligned-signal)/np.linalg.norm(signal))
-
+        SPC = SpectralClustering(n_clusters=k,
+                                affinity = 'precomputed',
+                                random_state=0).fit(affinity_matrix)
+        classes_spc = SPC.labels_
+        classes_est = np.apply_along_axis(lambda x: utils.assign_classes(x, X_est), 0, observations)
+        ARI_list_spc.append(adjusted_rand_score(classes_true, classes_spc))
+        ARI_list.append(adjusted_rand_score(classes_true, classes_est))
+ 
+        # store results
+        result[f'K={k}'] = {'classes':{'spc': classes_spc,
+                                       'het': classes_est,
+                                       'true': classes_true},
+                            'ARI'    : {'spc': ARI_list_spc,
+                                        'het': ARI_list}
+                                }
     
-with open('../results/visual.npy', 'wb') as f:
-    np.save(f, X_est)
-    np.save(f, X_aligned)
-    np.save(f, signal)
-    np.save(f,X0)
+    
+    fig, ax = plt.subplots(figsize = (15,6))
+    ax.plot(sigma_range, ARI_list_spc, label = 'Spectral Clustering')
+    ax.plot(sigma_range, ARI_list, label = 'Assignment to Heterogeneous Signals')
+    plt.grid()
+    plt.legend()
+    plt.title(f'Ajusted Rand Index of clustering against noise level, K = {k}')
+    plt.savefig(f'../plots/ARI_K={k}')
+    
+with open('../results/clustering.pkl', 'wb') as f:   
+        pickle.dump(result, f)
+    
+with open('../results/clustering.pkl', 'rb') as f:   
+    x = pickle.load(f)

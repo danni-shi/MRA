@@ -58,7 +58,12 @@ def get_lag_matrix(observations, ref = None):
         lag_mat = np.zeros((N,N))
         for j in range(N):
             for i in range(j):
-                lag = np.argmax((np.correlate(observations[:,i], observations[:,j], 'full'))[L-1:])
+                # lag = np.argmax((np.correlate(observations[:,i], observations[:,j], 'full'))[L-1:])
+                # if lag >= L//2 + 1:
+                #     lag -= L
+                # norm_factor = np.array(list(range(L))+list(range(L,0,-1)))
+                # lag = np.argmax((np.correlate(observations[:,i], observations[:,j], 'full'))/norm_factor)
+                _, lag = utils.align_to_ref(observations[:,i], observations[:,j])
                 if lag >= L//2 + 1:
                     lag -= L
                 lag_mat[i,j] = lag
@@ -109,11 +114,7 @@ def eval_alignment(observations, shifts, sigma, X_est = None):
     
     return mean_error, accuracy, mean_error_0, accuracy_0, X_est
 
-def assign_classes(observation, X_est):
-    dist = []
-    for k in range(X_est.shape[1]):
-        dist.append(np.linalg.norm(utils.align_to_ref(observation, X_est[:,k])[0]- X_est[:,k])**2)
-    return np.argmin(dist) + 1
+
 
 def eval_alignment_het(observations, shifts, X_est, classes = None):
     """compare the performance of lead-lag predition using intermidiate latent signal to naive pairwise prediciton
@@ -131,7 +132,7 @@ def eval_alignment_het(observations, shifts, X_est, classes = None):
     """
     L, N = observations.shape
     mean_error = mean_error_0 = accuracy = accuracy_0 = 0
-    classes_est = np.apply_along_axis(lambda x: assign_classes(x, X_est), 0, observations)
+    classes_est = np.apply_along_axis(lambda x: utils.assign_classes(x, X_est), 0, observations)
     class_accuracy = np.mean(classes_est == classes)
     
     for c in np.unique(classes):
@@ -145,10 +146,10 @@ def eval_alignment_het(observations, shifts, X_est, classes = None):
         lag_mat_0 = get_lag_matrix(sub_observations)
         
         # evaluate error and accuracy
-        norm = np.linalg.norm(lag_mat_true)
-        mean_error += np.linalg.norm(lag_mat - lag_mat_true)/norm
+        norm = np.linalg.norm(lag_mat_true,1)
+        mean_error += np.linalg.norm(lag_mat - lag_mat_true, 1)/norm
         accuracy += np.mean(abs(lag_mat - lag_mat_true) < 0.1) * 100
-        mean_error_0 += np.linalg.norm(lag_mat_0 - lag_mat_true)/norm
+        mean_error_0 += np.linalg.norm(lag_mat_0 - lag_mat_true, 1)/norm
         accuracy_0 += np.mean(abs(lag_mat_0 - lag_mat_true)< 0.1) * 100
     
     return  mean_error/len(np.unique(classes)),\
@@ -288,7 +289,7 @@ for k in K_range:
     plt.grid()
     plt.legend()
     plt.title(f'Change of Alignment Error with Noise Level ({type} signal)')
-    plt.savefig(f'../plots/align_error_{type}_K={k}')
+    plt.savefig(f'../plots/align_error_{type}_K={k}_0')
 
     fig, ax = plt.subplots(figsize = (15,6))
     ax.plot(sigma_range, acc_list, label = 'with intermediate')
@@ -296,18 +297,18 @@ for k in K_range:
     plt.grid()
     plt.legend()
     plt.title(f'Change of Alignment Accuracy with Noise Level ({type} signal)')
-    plt.savefig(f'../plots/align_acc_{type}_K={k}')
+    plt.savefig(f'../plots/align_acc_{type}_K={k}_0')
     
     fig, ax = plt.subplots(figsize = (15,6))
     ax.plot(sigma_range, class_acc_list)
     plt.grid()
     plt.title(f'Change of Class Assignment Accuracy with Noise Level ({type} signal)')
-    plt.savefig(f'../plots/class_acc_{type}_K={k}')
+    plt.savefig(f'../plots/class_acc_{type}_K={k}_0')
 
 with open('../results/alignment.pkl', 'wb') as f:   
     pickle.dump(result, f)
-    
-    
+
+
     
 # L = 50 # length of signal
 # N = 500 # number of copies
@@ -337,3 +338,8 @@ with open('../results/alignment.pkl', 'wb') as f:
 # print(f'accuracy of lag predictions: experiment: {accuracy:.2f}%; benchmark: {accuracy_0:.2f}%')
 # print(f'relative error of lag predictions: experiment: {mean_error:.2f}; benchmark: {mean_error_0:.2f}')
 
+
+
+# baseline: matrix entry as the residual of aligned observations, cluster them and everage the observaton in each class to recover the latent signal , then we compute the lags of observations against the signals
+
+# 

@@ -7,7 +7,7 @@ import pymanopt.optimizers
 
 import utils
 
-def optimise_manopt(data, sigma, X0 = None, extra_inits = 0):
+def optimise_manopt(data, sigma, X0 = None, extra_inits = 0, verbosity = 1):
     assert isinstance(extra_inits, int)
     L, N = data.shape
     mean_est, P_est, B_est = utils.invariants_from_data(data)
@@ -25,7 +25,7 @@ def optimise_manopt(data, sigma, X0 = None, extra_inits = 0):
     cost, grad, hess = create_cost_function(mean_est, P_est, B_est, sigma, manifold)
     # grad = hess = None
     problem = pymanopt.Problem(manifold, cost, euclidean_gradient=grad, euclidean_hessian=hess)
-    optimizer = pymanopt.optimizers.TrustRegions(min_gradient_norm = 1e-7, max_iterations = 50, verbosity = 2)
+    optimizer = pymanopt.optimizers.TrustRegions(min_gradient_norm = 1e-7, max_iterations = 50, verbosity = verbosity)
     if X0 is not None : 
         if X0.ndim == 1:
             X0 = X0.reshape(-1,1)

@@ -371,6 +371,45 @@ def align_to_ref_het(X, X_ref):
         
     return X_aligned, col_ind
 
+def assign_classes(observation, X_est):
+    dist = []
+    for k in range(X_est.shape[1]):
+        # dist.append(np.linalg.norm(utils.align_to_ref(observation, X_est[:,k])[0]- X_est[:,k])**2)
+        # dist.append(np.corrcoef(utils.align_to_ref(observation, X_est[:,k])[0], X_est[:,k])[0,1])
+        _, lag, corrcoef = align_to_ref(observation, X_est[:,k], True)
+        dist.append(corrcoef[lag])
+    return np.argmax(dist) + 1
+
+def alignment_residual(x1, x2):
+    """align the vector x1 after circularly shifting it such that it is optimally aligned with x2 in 2-norm. Calculate the 
+
+    Args:
+        x1 (np array): 
+        x2 (np array): 
+
+    Returns:
+        relative_residual (float): normalized residual between the aligned vector and x2.
+        lag (int): lag of best alignment
+    """
+    # align x1 to x2
+    x1_aligned, lag = align_to_ref(x1,x2)
+    relative_residual = np.linalg.norm(x1_aligned-x2)/np.linalg.norm(x1_aligned)/np.linalg.norm(x2)
+    
+    return relative_residual, lag
+
+def residual_lag_mat(observations):
+    L, N = observations.shape
+    residuals = np.zeros((N,N))
+    lags = np.zeros((N,N))
+    for j in range(N):
+        for i in range(j):
+            res, lag = alignment_residual(observations[:,i], observations[:,j])
+            residuals[i,j] = residuals[j,i] = res
+            lags[i,j] = lag
+            lags[j,i] = -lag
+    
+    return residuals, lags
+
 def hess_from_grad(grad):
     """return the hessian function as the jacobian of a gradient function from autograd. 
     

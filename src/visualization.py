@@ -12,17 +12,16 @@ y = np.roll(x,1)
 x_aligned = utils.align_to_ref(x,y)
 
 with open('../results/visual.npy', 'rb') as f:
-    X_est = np.load(f)
     X_aligned = np.load(f)
     signal = np.load(f)
-    X0 = np.load(f)
 
 
 # X_est = X_est.flatten()
 
 # use convolution theorem https://en.wikipedia.org/wiki/Cross-correlation
 # X_est_shifted, lag, ccf = utils.align_to_ref(X_est, signal, return_ccf = True)
-
+if X_aligned.ndim == 1:
+    X_aligned = X_aligned.reshape(-1,1)
 L, K = X_aligned.shape
 plt.rcParams['text.usetex'] = True
 fig, axes = plt.subplots(nrows = K, ncols = 1, figsize = (15,6), squeeze=False)
@@ -33,7 +32,7 @@ for i in range(K):
     ax[i].grid()
 plt.legend()
 plt.title('Comparison of the Original and Estimated Signals, adjusted for shifts')
-plt.savefig('../plots/estimate')
+plt.savefig('../plots/estimate0')
 
 
 # fig, ax = plt.subplots(figsize = (15,6))
