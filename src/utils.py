@@ -4,6 +4,7 @@ from matplotlib import pyplot as plt, dates
 import random
 import time
 import numpy as np
+import os
 import autograd.numpy as np
 from autograd import elementwise_grad as egrad
 from autograd import jacobian
@@ -378,7 +379,7 @@ def assign_classes(observation, X_est):
         # dist.append(np.corrcoef(utils.align_to_ref(observation, X_est[:,k])[0], X_est[:,k])[0,1])
         _, lag, corrcoef = align_to_ref(observation, X_est[:,k], True)
         dist.append(corrcoef[lag])
-    return np.argmax(dist) + 1
+    return np.argmax(dist)
 
 def alignment_residual(x1, x2):
     """align the vector x1 after circularly shifting it such that it is optimally aligned with x2 in 2-norm. Calculate the 
@@ -409,6 +410,20 @@ def residual_lag_mat(observations):
             lags[j,i] = -lag
     
     return residuals, lags
+
+def save_to_folder(directory, folder_name):
+    # given a dictionary of errors: error_dict[str_Learner_object_name] = prediction_loss_of_that_object
+    # save such files in the \recorded_results folder
+
+    now = dt.datetime.now()
+    date_string = now.strftime("%Y-%m-%d-%Hh%Mmin%Ss")  # use formatted datestring to name directory where results are saved
+
+    print('Recording results in directory: ' + directory, date_string + '_' + folder_name)
+    str_write_dir = os.path.join(directory + '/', date_string + '_' + folder_name)
+    os.makedirs(str_write_dir)
+    
+    return str_write_dir
+
 
 def hess_from_grad(grad):
     """return the hessian function as the jacobian of a gradient function from autograd. 

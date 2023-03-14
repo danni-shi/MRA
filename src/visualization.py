@@ -27,8 +27,8 @@ plt.rcParams['text.usetex'] = True
 fig, axes = plt.subplots(nrows = K, ncols = 1, figsize = (15,6), squeeze=False)
 ax = axes.flatten()
 for i in range(K):
-    ax[i].plot(np.arange(L),signal[:,i], label = 'true')
-    ax[i].plot(np.arange(L), X_aligned[:,i], label = 'estimate',linestyle = '--')
+    ax[i].plot(np.arange(L),signal, label = 'true')
+    ax[i].plot(np.arange(L), X_aligned, label = 'estimate',linestyle = '--')
     ax[i].grid()
 plt.legend()
 plt.title('Comparison of the Original and Estimated Signals, adjusted for shifts')
