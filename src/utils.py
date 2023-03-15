@@ -9,6 +9,7 @@ import autograd.numpy as np
 from autograd import elementwise_grad as egrad
 from autograd import jacobian
 from scipy.optimize import linear_sum_assignment
+from scipy import signal
 
 def get_dataset(type, ticker, date, nlevels, start = '34200000', end = '57600000'):
     """ Return LOBSTER intra-day dataset based on the default naming style
@@ -330,7 +331,7 @@ def invariants_from_data_het(X, w = None, sigma = None, debias = False, verbose 
         print('time to estimate invariants from data = ', time.time() - start)
     return mean_est, P_est, B_est
 
-def align_to_ref(X, X_ref, return_ccf = False):
+def align_to_ref(X, X_ref, return_ccf = False, normalised = True):
     """align the vector x after circularly shifting it such that it is optimally aligned with X_ref in 2-norm
 
     Args:
@@ -339,6 +340,12 @@ def align_to_ref(X, X_ref, return_ccf = False):
     """
     X_ref = X_ref.flatten()
     X = X.flatten()
+    
+    if normalised:
+        m1 = np.mean(X);s1 = np.std(X)
+        m2 = np.mean(X_ref);s2 = np.std(X_ref)
+        X = (X-m1)/s1
+        X_ref = (X_ref-m2)/s2
     
     X_ref_fft = np.fft.fft(X_ref)
     X_fft = np.fft.fft(X)
@@ -373,6 +380,15 @@ def align_to_ref_het(X, X_ref):
     return X_aligned, col_ind
 
 def assign_classes(observation, X_est):
+    """assign observations to reference signals based on highest linear cross correlation
+
+    Args:
+        observation (L np array): 
+        X_est (LxK np array): each column sits a single reference signal
+
+    Returns:
+        : column index of the reference signal best correlated to the given observation vector
+    """
     dist = []
     for k in range(X_est.shape[1]):
         # dist.append(np.linalg.norm(utils.align_to_ref(observation, X_est[:,k])[0]- X_est[:,k])**2)
@@ -381,7 +397,7 @@ def assign_classes(observation, X_est):
         dist.append(corrcoef[lag])
     return np.argmax(dist)
 
-def alignment_residual(x1, x2):
+def alignment_residual(x1, x2, return_lag = False):
     """align the vector x1 after circularly shifting it such that it is optimally aligned with x2 in 2-norm. Calculate the 
 
     Args:
@@ -396,20 +412,103 @@ def alignment_residual(x1, x2):
     x1_aligned, lag = align_to_ref(x1,x2)
     relative_residual = np.linalg.norm(x1_aligned-x2)/np.linalg.norm(x1_aligned)/np.linalg.norm(x2)
     
-    return relative_residual, lag
+    if return_lag:
+        return relative_residual, lag
+    else:
+        return relative_residual
 
-def residual_lag_mat(observations):
+
+def alignment_similarity(x1, x2, normalised = True, return_lag = False):
+    """return the highest cross correlation coefficient between two vectors up to a cyclic shift.
+
+    Args:
+        x1 (np array): 
+        x2 (np array):
+
+    Returns:
+        float: normalized correlation coefficient
+    """
+    
+    x1 = x1.flatten()
+    x2 = x2.flatten()
+    
+    if normalised:
+        m1 = np.mean(x1);s1 = np.std(x1)
+        m2 = np.mean(x2);s2 = np.std(x2)
+        x1 = (x1-m1)/s1
+        x2 = (x2-m2)/s2
+    
+    x1_fft = np.fft.fft(x1)
+    x2_fft = np.fft.fft(x2)
+    ccf = np.fft.ifft(x2_fft.conj() * x1).real
+
+    if return_lag:
+        lag = np.argmax(ccf)
+        return np.max(ccf), lag
+    else: return np.max(ccf)
+
+def alignment_similarity_linear(x1, x2, normalised = True, return_lag = False):
+    """return the highest linear cross correlation coefficient between two vectors.
+
+    Args:
+        x1 (np array): 
+        x2 (np array):
+
+    Returns:
+        correlation: normalized correlation coefficient
+        lag: lag of signal 
+    """
+    x1 = x1.flatten()
+    x2 = x2.flatten()
+    
+    if normalised:
+        m1 = np.mean(x1);s1 = np.std(x1)
+        m2 = np.mean(x2);s2 = np.std(x2)
+        x1 = (x1-m1)/s1
+        x2 = (x2-m2)/s2
+    ccf = signal.correlate(x1, x2, 'full')
+    
+    if return_lag:
+        lag = len(x2) - np.argmax(ccf) - 1
+        return np.max(ccf), lag
+    else: return np.max(ccf)
+
+# for n in [8,10,12]:
+#     x = np.random.normal(0,1,n)
+#     for l in [-3,-2,-1,1,2,3]:
+#         y = np.roll(x, l)
+#         if l > 0:
+#             y[0:l] = np.zeros(abs(l))
+#         else:
+#             y[len(y)+l:len(y)] = np.zeros(abs(l))
+        
+#         corr, lag = alignment_similarity_linear(x,y, return_lag=True)
+#         assert lag == l, f'fn lag{lag}; true lag: {l}; n:{n}'
+
+
+def score_lag_mat(observations, score_fn = alignment_similarity_linear):
+    """produce the similarity or residual scores and best lags of a set of observations with a given score function
+
+    Args:
+        observations (LxN np array): vectors 
+        score_fn (python function, optional): score function which is used to compute the scores and lags between every pair of observations. Defaults to alignment_similarity_linear.
+
+    Returns:
+        scores: (NxN np array) ij-th entry denotes the scores between observations i and j
+        lags: (NxN np array) ij-th entry denotes the best predicted lag between observations i and j
+    """
     L, N = observations.shape
-    residuals = np.zeros((N,N))
+    scores = np.zeros((N,N))
     lags = np.zeros((N,N))
     for j in range(N):
         for i in range(j):
-            res, lag = alignment_residual(observations[:,i], observations[:,j])
-            residuals[i,j] = residuals[j,i] = res
+            score, lag = score_fn(observations[:,i], observations[:,j], return_lag=True)
+            scores[i,j] = scores[j,i] = score
             lags[i,j] = lag
             lags[j,i] = -lag
     
-    return residuals, lags
+    return scores, lags
+
 
 def save_to_folder(directory, folder_name):
     # given a dictionary of errors: error_dict[str_Learner_object_name] = prediction_loss_of_that_object

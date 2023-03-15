@@ -18,10 +18,10 @@ import optimization
 from alignment import eval_alignment_het
 
 # intialise parameters
-sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise
+sigma_range = np.arange(0.1,2.1,1) # std of random gaussian noise
 # sigma_range = [0.3,0.4,1.3]
 max_shift= 0.1 # max proportion of lateral shift
-K_range = [2,3,4]
+K_range = [2]
 n = 200 # number of observations we evaluate
 
 # data path
@@ -58,9 +58,11 @@ for k in K_range:
         X_true = results_mat['x_true']
 
         # baseline clustering method
-        residuals, lags = utils.residual_lag_mat(observations)
-        delta = 1
-        affinity_matrix = np.exp(- residuals ** 2 / (2. * delta ** 2))
+        # residuals, lags = utils.score_lag_mat(observations, utils.alignment_residual)
+        # delta = 1
+        # affinity_matrix = np.exp(- residuals ** 2 / (2. * delta ** 2))
+        
+        affinity_matrix, lags = utils.score_lag_mat(observations)
 
         SPC = SpectralClustering(n_clusters=k,
                                 affinity = 'precomputed',
