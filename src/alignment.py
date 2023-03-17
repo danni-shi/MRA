@@ -151,7 +151,7 @@ def eval_alignment_het(observations, shifts, classes_est = None, X_est = None, s
         sub_observations = observations.T[classes_est == c].T
         if X_est is None:
             # estimate and align to signal
-            sub_X_est = optimization.optimise_manopt(sub_observations, sigma,verbosity=0)
+            sub_X_est = optimization.optimise_manopt(sub_observations, sigma,verbosity=1)
             X_est_list.append(sub_X_est.reshape(-1,1))
         else:
             sub_X_est = X_est[:,c]

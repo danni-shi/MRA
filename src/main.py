@@ -14,18 +14,17 @@ import scipy.io as spio
 from scipy.linalg import block_diag
 
 import utils
-import optimization
 from alignment import eval_alignment_het
 
 # intialise parameters
-sigma_range = np.arange(0.1,2.1,1) # std of random gaussian noise
+sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise
 # sigma_range = [0.3,0.4,1.3]
 max_shift= 0.1 # max proportion of lateral shift
 K_range = [2]
 n = 200 # number of observations we evaluate
 
 # data path
-data_path = '/Users/caribbeanbluetin/Desktop/Research/MRA_LeadLag/HeterogeneousMRA/data_n=500/'
+data_path = '../data5000/'
 results_save_dir = utils.save_to_folder('../plots/SPC_cluster', '')
 result = {}
 for k in K_range:
@@ -57,6 +56,9 @@ for k in K_range:
         P_est = results_mat['p_est'].flatten()
         X_true = results_mat['x_true']
 
+        if j == 0:
+            print('length and size of observations: ', observations.shape)
+            j += 1
         # baseline clustering method
         # residuals, lags = utils.score_lag_mat(observations, utils.alignment_residual)
         # delta = 1
@@ -86,28 +88,28 @@ for k in K_range:
         error_list_spc.append(mean_error_spc)
         acc_list_spc.append(accuracy_spc)
 
-        if sigma % 0.5 < 1:
-            # plot the difference of estimated signals
+        # if sigma % 0.5 < 1:
+        #     # plot the difference of estimated signals
 
-            X_spc_aligned, perm = utils.align_to_ref_het(X_est_spc, X_true)
-            fig, ax = plt.subplots(k, 1, figsize = (10,5*k))
-            for i in range(k):
-                rel_err_hetero = np.linalg.norm(X_est[:,i]-X_true[:,i])/np.linalg.norm(X_true)
-                rel_err_spc = np.linalg.norm(X_spc_aligned[:,i]-X_true[:,i])/np.linalg.norm(X_true)
-                p_true = np.sum(classes_true==i)/observations.shape[1]
-                ax[i].plot(X_true[:,i], label = 'true')
-                ax[i].plot(X_est[:,i], label = 'hetero', linestyle = '--')
-                ax[i].plot(X_spc_aligned[:,i], label = 'spc', linestyle = ':')
-                ax[i].set_title(f'rel. err.:  hetero {rel_err_hetero:.2f}; '\
-                                f'spc {rel_err_spc:.2f}; '\
-                                f'true p: {p_true:.2f}, '\
-                                f'est. p: {P_est[i]:.2f}')
-                ax[i].grid()
-                ax[i].legend()
+        #     X_spc_aligned, perm = utils.align_to_ref_het(X_est_spc, X_true)
+        #     fig, ax = plt.subplots(k, 1, figsize = (10,5*k))
+        #     for i in range(k):
+        #         rel_err_hetero = np.linalg.norm(X_est[:,i]-X_true[:,i])/np.linalg.norm(X_true)
+        #         rel_err_spc = np.linalg.norm(X_spc_aligned[:,i]-X_true[:,i])/np.linalg.norm(X_true)
+        #         p_true = np.sum(classes_true==i)/observations.shape[1]
+        #         ax[i].plot(X_true[:,i], label = 'true')
+        #         ax[i].plot(X_est[:,i], label = 'hetero', linestyle = '--')
+        #         ax[i].plot(X_spc_aligned[:,i], label = 'spc', linestyle = ':')
+        #         ax[i].set_title(f'rel. err.:  hetero {rel_err_hetero:.2f}; '\
+        #                         f'spc {rel_err_spc:.2f}; '\
+        #                         f'true p: {p_true:.2f}, '\
+        #                         f'est. p: {P_est[i]:.2f}')
+        #         ax[i].grid()
+        #         ax[i].legend()
             
-            fig.suptitle(f'Comparison of the True and Estimated Signals, K = {k}, noise = {sigma:.2g}')
-            plt.savefig(results_save_dir + f'/signals_K={k}_{j}')
-            j += 1
+        #     fig.suptitle(f'Comparison of the True and Estimated Signals, K = {k}, noise = {sigma:.2g}')
+        #     plt.savefig(results_save_dir + f'/signals_K={k}_{j}')
+        #     j += 1
     
     # store results
     result[f'K={k}'] = {'classes':{'spc': classes_spc,

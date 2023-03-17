@@ -3,4 +3,5 @@
 plots/
 *.csv
 .vscode/
+data*/
 
