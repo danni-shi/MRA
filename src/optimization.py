@@ -4,8 +4,27 @@ from autograd import jacobian
 import pymanopt
 import pymanopt.manifolds
 import pymanopt.optimizers
+import matlab.engine
 
 import utils
+
+def optimise_matlab(data, sigma, K, X0=[], p0=[], opts=[], w=[], nextrainits=0):
+    if opts == []:
+         opts = {'maxiter': 200,
+                 'tolgradnorm': 1e-7,
+                 'tolcost': 1e-18,
+                 'verbosity': 1}
+    eng = matlab.engine.start_matlab()
+    eng.addpath('/Users/caribbeanbluetin/Desktop/Research/MRA_LeadLag/HeterogeneousMRA')
+    # opts_struct = eng.struct(opts)
+    # X_est, p_est, problem = eng.MRA_het_mixed_invariants_free_p(data, sigma, K, X0, p0, opts, w, nextrainits)
+    data = data.astype(np.float64)
+    K = float(K)
+    X_est, p_est, problem = eng.MRA_het_mixed_invariants_free_p(data, sigma, K, [], [], opts, nargout=3)
+    eng.quit()
+    
+    return np.array(X_est), np.array(p_est).flatten(), problem
+
 
 def optimise_manopt(data, sigma, X0 = None, extra_inits = 0, verbosity = 1):
     assert isinstance(extra_inits, int)

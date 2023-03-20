@@ -20,11 +20,11 @@ from alignment import eval_alignment_het
 sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise
 # sigma_range = [0.3,0.4,1.3]
 max_shift= 0.1 # max proportion of lateral shift
-K_range = [2]
+K_range = [2,3,4]
 n = 200 # number of observations we evaluate
 
 # data path
-data_path = '../data5000/'
+data_path = '../data_n=500/'
 results_save_dir = utils.save_to_folder('../plots/SPC_cluster', '')
 result = {}
 for k in K_range:
