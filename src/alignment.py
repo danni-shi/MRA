@@ -159,12 +159,10 @@ def eval_alignment_het(observations, shifts, classes_est = None, X_est = None, s
         
         # lag_mat_0 = get_lag_matrix(sub_observations)
         
-        # evaluate error and accuracy
+        # evaluate error and accuracy, weighted by cluster size
         norm = np.linalg.norm(lag_mat_true,1)
         mean_error += sub_observations.shape[1]/N * np.linalg.norm(lag_mat - lag_mat_true, 1)/norm 
         accuracy += sub_observations.shape[1]/N * np.mean(abs(lag_mat - lag_mat_true) < 0.1) * 100
-        # mean_error_0 += np.linalg.norm(lag_mat_0 - lag_mat_true, 1)/norm
-        # accuracy_0 += np.mean(abs(lag_mat_0 - lag_mat_true)< 0.1) * 100
     
     
     if X_est is None:
@@ -172,8 +170,6 @@ def eval_alignment_het(observations, shifts, classes_est = None, X_est = None, s
         return mean_error, accuracy, X_est
     else:
         return  mean_error, accuracy
-            # class_accuracy,\
-            
 
 
 

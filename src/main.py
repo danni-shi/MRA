@@ -59,10 +59,8 @@ for k in K_range:
         if j == 0:
             print('length and size of observations: ', observations.shape)
             j += 1
+            
         # baseline clustering method
-        # residuals, lags = utils.score_lag_mat(observations, utils.alignment_residual)
-        # delta = 1
-        # affinity_matrix = np.exp(- residuals ** 2 / (2. * delta ** 2))
         
         affinity_matrix, lags = utils.score_lag_mat(observations)
 
@@ -74,19 +72,25 @@ for k in K_range:
         ARI_list_spc.append(adjusted_rand_score(classes_true, classes_spc))
         ARI_list.append(adjusted_rand_score(classes_true, classes_est))
 
-        # evaluate the estimation of lags
+        # evaluate the estimation of lags for methods
+        
+        # SPC + synchronization
+        
+        
+        # SPC + homogeneous optimization
+        mean_error_spc, accuracy_spc, X_est_spc = \
+            eval_alignment_het(observations, shifts, classes_spc, sigma = sigma)
+        
+        error_list_spc.append(mean_error_spc)
+        acc_list_spc.append(accuracy_spc)
         
         # heterogeneous optimization
         mean_error, accuracy = \
             eval_alignment_het(observations, shifts, classes_est, X_est)
-        # baseline
-        mean_error_spc, accuracy_spc, X_est_spc = \
-            eval_alignment_het(observations, shifts, classes_spc, sigma = sigma)
         
         error_list.append(mean_error)
         acc_list.append(accuracy)
-        error_list_spc.append(mean_error_spc)
-        acc_list_spc.append(accuracy_spc)
+        
 
         # if sigma % 0.5 < 1:
         #     # plot the difference of estimated signals
