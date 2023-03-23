@@ -1,7 +1,7 @@
 """compare clustering performance of heterogeneous optimization of MRA and spectral clustering;
 Compare the accuracy of lag recovery between the two methods
 """
-
+#======== imports ===========
 import numpy as np
 import pickle
 import matplotlib.pyplot as plt
@@ -14,27 +14,36 @@ import scipy.io as spio
 from scipy.linalg import block_diag
 
 import utils
-from alignment import eval_alignment_het
+import alignment
 
+# ======= initialisation ===========
 # intialise parameters
 sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise
 # sigma_range = [0.3,0.4,1.3]
 max_shift= 0.1 # max proportion of lateral shift
 K_range = [2,3,4]
-n = 200 # number of observations we evaluate
+# n = 200 # number of observations we evaluate
 
 # data path
 data_path = '../data_n=500/'
-results_save_dir = utils.save_to_folder('../plots/SPC_cluster', '')
+labels = {'pairwise': 'SPC',
+            'spc': 'SPC-IVF',
+            'het': 'IVF'}
 result = {}
-for k in K_range:
+
+#===== calculatations over a grid of K and sigma ===========
+
+for k in tqdm(K_range):
     # iniitialise containers
     ARI_list = []
     ARI_list_spc = []
-    error_list = []
-    acc_list = []
+    error_list_pair = []
+    acc_list_pair = []
     error_list_spc = []
     acc_list_spc = []
+    error_list_het = []
+    acc_list_het = []
+
     j = 0
     
     for sigma in tqdm(sigma_range):
@@ -62,7 +71,7 @@ for k in K_range:
             
         # baseline clustering method
         
-        affinity_matrix, lags = utils.score_lag_mat(observations)
+        affinity_matrix, lag_matrix = utils.score_lag_mat(observations)
 
         SPC = SpectralClustering(n_clusters=k,
                                 affinity = 'precomputed',
@@ -73,23 +82,32 @@ for k in K_range:
         ARI_list.append(adjusted_rand_score(classes_true, classes_est))
 
         # evaluate the estimation of lags for methods
+        # ground truth lag matrix
+        lag_mat_true = alignment.lag_mat_post_clustering(alignment.lag_vec_to_mat(shifts),classes_true)
+        lag_matrix = alignment.lag_mat_post_clustering(lag_matrix, classes_spc)
+        
+        # SPC + pairwaise correlation-based lags
+        rel_error_pair, accuracy_pair = alignment.eval_lag_mat(lag_matrix, lag_mat_true)
+        
+        error_list_pair.append(rel_error_pair)
+        acc_list_pair.append(accuracy_pair)
         
         # SPC + synchronization
         
         
         # SPC + homogeneous optimization
-        mean_error_spc, accuracy_spc, X_est_spc = \
-            eval_alignment_het(observations, shifts, classes_spc, sigma = sigma)
+        rel_error_spc, accuracy_spc, X_est_spc = \
+            alignment.eval_alignment_het(observations, shifts, classes_spc, sigma = sigma)
         
-        error_list_spc.append(mean_error_spc)
+        error_list_spc.append(rel_error_spc)
         acc_list_spc.append(accuracy_spc)
         
         # heterogeneous optimization
-        mean_error, accuracy = \
-            eval_alignment_het(observations, shifts, classes_est, X_est)
+        rel_error_het, accuracy_het = \
+            alignment.eval_alignment_het(observations, shifts, classes_est, X_est)
         
-        error_list.append(mean_error)
-        acc_list.append(accuracy)
+        error_list_het.append(rel_error_het)
+        acc_list_het.append(accuracy_het)
         
 
         # if sigma % 0.5 < 1:
@@ -116,41 +134,43 @@ for k in K_range:
         #     j += 1
     
     # store results
-    result[f'K={k}'] = {'classes':{'spc': classes_spc,
+    result[f'K={k}'] = {'classes' :{'spc': classes_spc,
                                     'het': classes_est,
                                     'true': classes_true},
-                        'ARI'    : {'spc': ARI_list_spc,
+                        'ARI'     : {'spc': ARI_list_spc,
                                     'het': ARI_list},
-                        'error'    : {'spc': error_list_spc,
-                                    'het': error_list},
-                        'accuracy'    : {'spc': acc_list_spc,
-                                    'het': acc_list}
-                        
+                        'error'   : {'pairwise': error_list_pair,
+                                    'spc': error_list_spc,
+                                    'het': error_list_het},
+                        'accuracy': {'pairwise': acc_list_pair,
+                                    'spc': acc_list_spc,
+                                    'het': acc_list_het}            
                             }
-    
+# save the results
+with open('../results/clustering.pkl', 'wb') as f:   
+        pickle.dump(result, f)
+        
+#======== plot the results ==================
+
+results_save_dir = utils.save_to_folder('../plots/SPC_cluster', '')
+for k in K_range: 
     fig, axes = plt.subplots(3,1, figsize = (15,18), squeeze=False)
     ax = axes.flatten()
-    ax[0].plot(sigma_range, ARI_list, label = 'Assignment to Heterogeneous Signals')
-    ax[0].plot(sigma_range, ARI_list_spc, label = 'Spectral Clustering')
-    ax[0].grid()
-    ax[0].legend()
-    ax[0].set_title(f'Ajusted Rand Index of clustering against noise level, K = {k}')
+    plot_list = ['ARI', 'error', 'accuracy']
     
-    ax[1].plot(sigma_range, error_list, label = 'Heterogeneous optimization')
-    ax[1].plot(sigma_range, error_list_spc, label = 'Spectral Clustering')
-    ax[1].grid()
-    ax[1].legend()
-    ax[1].set_title(f'Change of Alignment Error with Noise Level')
+    for i in range(len(plot_list)):
+        for key, result_list in result[f'K={k}'][plot_list[i]].items():
+            ax[i].plot(sigma_range, result_list, label = labels[key])
+        ax[i].grid()
+        ax[i].legend()
+        ax[i].set_xlabel('std of added noise')
 
-    ax[2].plot(sigma_range, acc_list, label = 'Heterogeneous optimization')
-    ax[2].plot(sigma_range, acc_list_spc, label = 'Spectral Clustering')
-    ax[2].grid()
-    ax[2].legend()
+    ax[0].set_title(f'Ajusted Rand Index of clustering against noise level, K = {k}')
+    ax[1].set_title(f'Change of Alignment Error with Noise Level')
     ax[2].set_title(f'Change of Alignment Accuracy with Noise Level')
     plt.savefig(results_save_dir + f'/acc_err_ARI_K={k}_0')
     
-with open('../results/clustering.pkl', 'wb') as f:   
-        pickle.dump(result, f)
+
 
 
 ### If we only want clustering results 

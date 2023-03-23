@@ -7,7 +7,7 @@ import time
 from tqdm import tqdm
 import scipy.io as spio
 from scipy.linalg import block_diag
-
+from scipy.optimize import linear_sum_assignment
     
     
 def get_signal(type, L):
@@ -33,6 +33,31 @@ def lag_vec_to_mat(vec):
 
 assert np.linalg.norm(lag_vec_to_mat(np.array([0,1]))-np.array([[0,-1],[1,0]])) < 1e-10
 assert np.linalg.norm(lag_vec_to_mat(np.array([1,2,3]))-np.array([[0,-1,-2],[1,0,-1],[2,1,0]])) < 1e-10
+
+def lag_mat_het(lags, classes, return_block_mat = False):
+    """arrange lags vector or lags matrix into block-diagonal form based on the given class labels. 
+
+    Args:
+        lags (np array): lags vector or matrix
+        classes (np array): class labels of each observation
+        return_block_mat (bool, optional): if True, return the list of matrices in block-diagonal form; else return the list. Defaults to False.
+
+    Returns:
+        _type_: _description_
+    """
+    lag_mat_list = []
+
+    for c in np.unique(classes):
+        if lags.ndim == 2 and lags.shape[0] == lags.shape[1]:
+            sub_lags = lags[classes == c, classes == c]
+        else:
+            sub_lags = lag_vec_to_mat(lags[classes == c])
+        lag_mat_list.append(sub_lags)
+    
+    if return_block_mat:
+        return block_diag(*lag_mat_list)
+    else:
+        return lag_mat_list
 
 def get_lag_matrix(observations, ref = None):
     """calculate the best lags estimates of a given set of observations, with or without a latent reference signal
@@ -79,7 +104,59 @@ def get_lag_mat_het(observations, ref = None, classes = None):
         lag_mat_list.append(get_lag_matrix(sub_observations,sub_ref))
     
     return block_diag(*lag_mat_list)
+
+def eval_lag_mat(lag_mat, lag_mat_true):
+    """compute the relative error and accuracy of a lag matrix wrt to a ground truth lag matrix
+
+    Args:
+        lag_mat (_type_): _description_
+        lag_mat_true (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    if lag_mat_true.ndim == 1 or \
+        np.count_nonzero(np.array(lag_mat_true.shape) != 1) == 1:
+        lag_mat_true = lag_vec_to_mat(lag_mat_true)
+        
+    rel_error = np.linalg.norm(lag_mat - lag_mat_true,1)/np.linalg.norm(lag_mat_true,1)
+    accuracy = np.mean(abs(lag_mat - lag_mat_true) < 0.1) * 100
     
+    return rel_error, accuracy
+
+def lag_mat_post_clustering(lag_mat, classes):
+    """mask the i-j entry of the lag matrix if sample i,j are not in the same cluster.
+
+    Args:
+        lag_mat (_type_): _description_
+        classes (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    for c in np.unique(classes):
+        mask = (classes==c)[:,None] * (classes!=c)[None,:]
+        lag_mat[mask] = 0
+    return lag_mat
+
+def eval_lag_mat_het(lag_mat, lag_mat_true, classes, classes_true):
+    """evaluate the relative error and accurcy of a lag matrix if there are more than one class of samples.
+
+    Args:
+        lag_mat (_type_): _description_
+        lag_mat_true (_type_): _description_
+        classes (_type_): _description_
+        classes_true (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    lag_mat = lag_mat_post_clustering(lag_mat, classes)
+    lag_mat_true = lag_mat_post_clustering(lag_mat_true, classes_true)
+    rel_error, accuracy = eval_lag_mat(lag_mat, lag_mat_true)
+    
+    return rel_error, accuracy
+
 def eval_alignment(observations, shifts, sigma, X_est = None):
     """compare the performance of lead-lag predition using intermidiate latent signal to naive pairwise prediciton
 

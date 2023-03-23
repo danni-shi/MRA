@@ -13,7 +13,7 @@ def optimise_matlab(data, sigma, K, X0=[], p0=[], opts=[], w=[], nextrainits=0):
          opts = {'maxiter': 200,
                  'tolgradnorm': 1e-7,
                  'tolcost': 1e-18,
-                 'verbosity': 1}
+                 'verbosity': 0}
     eng = matlab.engine.start_matlab()
     eng.addpath('/Users/caribbeanbluetin/Desktop/Research/MRA_LeadLag/HeterogeneousMRA')
     # opts_struct = eng.struct(opts)
