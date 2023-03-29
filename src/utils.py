@@ -379,6 +379,31 @@ def align_to_ref_het(X, X_ref):
         
     return X_aligned, col_ind
 
+def align_classes(clustering1, clustering2):
+    """align two clusterings such that the most similar pair of groups have the same label 
+
+    Args:
+        clustering1 (1D array): class labels of each sample with length n
+        clustering2 (1D array): length n. Must have the same number of classes as clustering1
+    """
+    K1 = len(np.unique(clustering1))
+    K2 = len(np.unique(clustering2))
+    assert K1 == K2, 'clusterings have different number of groups'
+    cost_mat = np.zeros((K1,K2))
+    for i in range(K1):
+        for j in range(K2):
+            a = np.unique(clustering1)[i]
+            b = np.unique(clustering2)[j]
+            intersection = np.sum((clustering1==a) * (clustering2==b))
+            union = np.sum((clustering1==a) + (clustering2==b))
+            cost_mat[i,j] = -intersection/union
+    row_ind, col_ind = linear_sum_assignment(cost_mat)
+    mapping = {np.unique(clustering1)[i]: np.unique(clustering2)[col_ind[i]] for i in range(K1)}
+    clustering1 = np.array(list(map(mapping.get, clustering1)))
+
+    return clustering1
+            
+
 def assign_classes(observation, X_est):
     """assign observations to reference signals based on highest linear cross correlation
 

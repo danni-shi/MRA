@@ -6,6 +6,7 @@ import numpy as np
 import pickle
 import matplotlib.pyplot as plt
 import seaborn as sns
+import time
 from tqdm import tqdm
 
 from sklearn.cluster import SpectralClustering, KMeans
@@ -21,7 +22,7 @@ import alignment
 sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise
 # sigma_range = [0.3,0.4,1.3]
 max_shift= 0.1 # max proportion of lateral shift
-K_range = [2,3,4]
+K_range = [2]
 # n = 200 # number of observations we evaluate
 
 # data path
@@ -78,13 +79,18 @@ for k in tqdm(K_range):
                                 random_state=0).fit(affinity_matrix)
         classes_spc = SPC.labels_
         classes_est = np.apply_along_axis(lambda x: utils.assign_classes(x, X_est), 0, observations)
+        classes_spc_aligned = utils.align_classes(classes_spc,classes_true)
+        classes_est_aligned = utils.align_classes(classes_est,classes_true)
+        assert np.sum(classes_spc_aligned==classes_true) >= np.sum(classes_spc==classes_true)
+        assert np.sum(classes_est_aligned==classes_true) >= np.sum(classes_est==classes_true)
+        
         ARI_list_spc.append(adjusted_rand_score(classes_true, classes_spc))
         ARI_list.append(adjusted_rand_score(classes_true, classes_est))
 
         # evaluate the estimation of lags for methods
         # ground truth lag matrix
         lag_mat_true = alignment.lag_mat_post_clustering(alignment.lag_vec_to_mat(shifts),classes_true)
-        lag_matrix = alignment.lag_mat_post_clustering(lag_matrix, classes_spc)
+        lag_matrix = alignment.lag_mat_post_clustering(lag_matrix, classes_spc_aligned)
         
         # SPC + pairwaise correlation-based lags
         rel_error_pair, accuracy_pair = alignment.eval_lag_mat(lag_matrix, lag_mat_true)
@@ -93,7 +99,12 @@ for k in tqdm(K_range):
         acc_list_pair.append(accuracy_pair)
         
         # SPC + synchronization
-        
+        for c in np.unique(classes_spc):
+            sub_lag_matrix = lag_matrix[classes_spc == c][:,classes_spc == c]
+            start = time.time()
+            pi, r, _ = alignment.SVD_NRS(sub_lag_matrix)
+            print(f'Time to run SVD-NRS = {time.time()-start:.5f}s.')
+            r_rounded = np.array(np.round(r), dtype=int)
         
         # SPC + homogeneous optimization
         rel_error_spc, accuracy_spc, X_est_spc = \

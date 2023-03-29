@@ -4,4 +4,4 @@ plots/
 *.csv
 .vscode/
 data*/
-
+venv*/
