@@ -119,9 +119,14 @@ def eval_lag_mat(lag_mat, lag_mat_true):
     if lag_mat_true.ndim == 1 or \
         np.count_nonzero(np.array(lag_mat_true.shape) != 1) == 1:
         lag_mat_true = lag_vec_to_mat(lag_mat_true)
-        
-    rel_error = np.linalg.norm(lag_mat - lag_mat_true,1)/np.linalg.norm(lag_mat_true,1)
-    accuracy = np.mean(abs(lag_mat - lag_mat_true) < 0.1) * 100
+    
+    N = lag_mat_true.shape[0]
+    np.fill_diagonal(lag_mat, np.nan)
+    diff_mat = lag_mat - lag_mat_true
+    rel_error = np.sum(abs(diff_mat[~np.isnan(diff_mat)]))
+    rel_error /= np.sum(abs(lag_mat_true[~np.isnan(lag_mat_true)]))
+    # ignore the diagonal entries 
+    accuracy = np.sum(abs(diff_mat[~np.isnan(diff_mat)]) < 0.1)/(N**2-N) * 100
     
     return rel_error, accuracy
 
@@ -135,10 +140,13 @@ def lag_mat_post_clustering(lag_mat, classes):
     Returns:
         _type_: _description_
     """
+    lag_mat_out = lag_mat.copy()
     for c in np.unique(classes):
         mask = (classes==c)[:,None] * (classes!=c)[None,:]
-        lag_mat[mask] = 0
-    return lag_mat
+        lag_mat_out[mask] = np.nan
+        np.fill_diagonal(lag_mat_out, np.nan)
+    
+    return lag_mat_out
 
 
 def eval_lag_mat_het(lag_mat, lag_mat_true, classes, classes_true):
@@ -153,10 +161,28 @@ def eval_lag_mat_het(lag_mat, lag_mat_true, classes, classes_true):
     Returns:
         _type_: _description_
     """
+    if lag_mat_true.ndim == 1 or \
+        np.count_nonzero(np.array(lag_mat_true.shape) != 1) == 1:
+        lag_mat_true = lag_vec_to_mat(lag_mat_true)
+    
+    # mask th irrelavant entries with nan
     lag_mat = lag_mat_post_clustering(lag_mat, classes)
     lag_mat_true = lag_mat_post_clustering(lag_mat_true, classes_true)
-    rel_error, accuracy = eval_lag_mat(lag_mat, lag_mat_true)
-    
+    # calculate scale
+    N = lag_mat_true.shape[0]
+    # number of valid lags for evaluation
+    tol_count_val = np.count_nonzero(~np.isnan(lag_mat-lag_mat_true))
+    tol_count_true = np.count_nonzero(~np.isnan(lag_mat_true))
+    count_diff = tol_count_true - tol_count_val
+    assert count_diff >= 0
+    diff_mat = lag_mat - lag_mat_true
+    # if the cluster assignment is wrong, add error = assumed max shift
+    penalty = np.nanmax(abs(lag_mat_true))
+    rel_error = np.sum(abs(diff_mat[~np.isnan(diff_mat)])) + penalty * count_diff
+    rel_error /= np.sum(abs(lag_mat_true[~np.isnan(lag_mat_true)]))
+    # ignore the diagonal entries 
+    accuracy = np.sum(abs(diff_mat[~np.isnan(diff_mat)]) < 0.1)/tol_count_true * 100
+    # calculate the proportion of valid entries
     return rel_error, accuracy
 
 def eval_alignment(observations, shifts, sigma, X_est = None):
@@ -327,6 +353,43 @@ def SVD_NRS(H, scale_estimator = 'median'):
     assert np.linalg.norm(r_test.flatten()-r.flatten()) <1e-8 or np.linalg.norm(r_test.flatten()+r.flatten()) <1e-8
     return pi.flatten(), r.flatten(), tau
 
+def shift(X, shifts, cyclic = False):
+    """shifts a set of time series by a given set of lags
+
+    Args:
+        X (LxN array): each column contains a time series
+        shifts (len N array): i-th entry denote the lag to the i th column of X
+        cyclic (bool, optional): whether the shift is cyclic. Defaults to False.
+    """
+    L, N = X.shape
+    data = np.zeros(X.shape)
+    
+    for i in range(N):
+        k = shifts[i]
+        y = np.roll(X[:,i],k)
+        if not cyclic:
+            # y[:k] = np.random.normal(0, 1, size = k)
+            if k < 0:
+                y[L+k:L] = np.zeros(k)
+            else:
+                y[:k] = np.zeros(k)
+        data[:,i] = y
+    return data
+
+def synchronize(X, shifts, cyclic = False):
+    """for a sample of shifted copies, with the knowledge of their lags, shifts the samples back to their original positions and compute the sample average 
+
+    Args:
+        X (LxN array): each column contains a time series
+        shifts (len N array): i-th entry denote the lag to the i th column of X
+        cyclic (bool, optional): whether the shift is cyclic. Defaults to False.
+
+    Returns:
+        _type_: _description_
+    """
+    X_shifted = shift(X, -shifts, cyclic = cyclic)
+    
+    return X_shifted.mean(axis = 1)
 
 def align_plot():
     # intialise parameters for generating observations

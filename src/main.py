@@ -72,8 +72,10 @@ for k in tqdm(K_range):
             
         # baseline clustering method
         
-        affinity_matrix, lag_matrix = utils.score_lag_mat(observations)
-
+        affinity_matrix, lag_matrix = utils.score_lag_mat(observations,score_fn=utils.alignment_similarity)
+        # lag_matrix_test = alignment.get_lag_matrix(observations)
+        # print(np.linalg.norm(lag_matrix-alignment.lag_vec_to_mat(shifts)))
+        # print(np.linalg.norm(lag_matrix_test-alignment.lag_vec_to_mat(shifts)))
         SPC = SpectralClustering(n_clusters=k,
                                 affinity = 'precomputed',
                                 random_state=0).fit(affinity_matrix)
@@ -87,24 +89,39 @@ for k in tqdm(K_range):
         ARI_list_spc.append(adjusted_rand_score(classes_true, classes_spc))
         ARI_list.append(adjusted_rand_score(classes_true, classes_est))
 
-        # evaluate the estimation of lags for methods
-        # ground truth lag matrix
-        lag_mat_true = alignment.lag_mat_post_clustering(alignment.lag_vec_to_mat(shifts),classes_true)
-        lag_matrix = alignment.lag_mat_post_clustering(lag_matrix, classes_spc_aligned)
+        #----- Evaluate the lag estimation methods -----#
+        # ground truth pairwise lag matrix
+        lag_mat_true = alignment.lag_vec_to_mat(shifts)
         
         # SPC + pairwaise correlation-based lags
-        rel_error_pair, accuracy_pair = alignment.eval_lag_mat(lag_matrix, lag_mat_true)
+        rel_error_pair, accuracy_pair = alignment.eval_lag_mat_het(lag_matrix, lag_mat_true,classes_spc_aligned, classes_true)
+        
+        rel_error_pair_0, accuracy_pair_0 = alignment.eval_lag_mat_het(lag_matrix, lag_mat_true,classes_spc, classes_true)
+        print(rel_error_pair_0-rel_error_pair)
+        print(accuracy_pair_0-accuracy_pair)
         
         error_list_pair.append(rel_error_pair)
         acc_list_pair.append(accuracy_pair)
-        
+       
+ 
         # SPC + synchronization
+        X_spc_est = np.zeros(X_true.shape)
+            
         for c in np.unique(classes_spc):
+            # copmpute the synchronized lags
             sub_lag_matrix = lag_matrix[classes_spc == c][:,classes_spc == c]
             start = time.time()
             pi, r, _ = alignment.SVD_NRS(sub_lag_matrix)
             print(f'Time to run SVD-NRS = {time.time()-start:.5f}s.')
             r_rounded = np.array(np.round(r), dtype=int)
+            r_rounded -= min(r_rounded) # make the relative lags start from zero
+            # compute the cluster average X
+            sub_observations = observations.T[classes_spc == c].T
+            X_spc_est[:,c] = alignment.synchronize(sub_observations, r_rounded)
+        
+        rel_error_spc_pair, accuracy_spc_pair = \
+            alignment.eval_alignment_het(observations, shifts, classes_spc, X_spc_est)
+        # TODO: change the accuracy and error calculations for eval_alignment_het
         
         # SPC + homogeneous optimization
         rel_error_spc, accuracy_spc, X_est_spc = \

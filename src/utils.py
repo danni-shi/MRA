@@ -85,6 +85,7 @@ def seconds_to_time(second, date = '2012-06-21'):
     time = dt.datetime.strptime("{} {}".format(date, td), "%Y-%m-%d %H:%M:%S.%f")
     return time
 
+
 def random_shift(x, num_copies, cyclic = True, max_shift = 0.1, seed = 42):
     """ create shifted copies of given signal
 
@@ -340,6 +341,7 @@ def align_to_ref(X, X_ref, return_ccf = False, normalised = True):
     """
     X_ref = X_ref.flatten()
     X = X.flatten()
+    L = len(X)
     
     if normalised:
         m1 = np.mean(X);s1 = np.std(X)
@@ -350,7 +352,10 @@ def align_to_ref(X, X_ref, return_ccf = False, normalised = True):
     X_ref_fft = np.fft.fft(X_ref)
     X_fft = np.fft.fft(X)
     ccf = np.fft.ifft(X_ref_fft.conj() * X_fft).real
+    
     lag = np.argmax(ccf)
+    if lag >= L//2 + 1:
+        lag -= L
     X_aligned = np.roll(X, -lag)
     
     if return_ccf:
@@ -453,22 +458,9 @@ def alignment_similarity(x1, x2, normalised = True, return_lag = False):
     Returns:
         float: normalized correlation coefficient
     """
+    _, lag, ccf = align_to_ref(x1, x2,return_ccf=True, normalised=normalised)
     
-    x1 = x1.flatten()
-    x2 = x2.flatten()
-    
-    if normalised:
-        m1 = np.mean(x1);s1 = np.std(x1)
-        m2 = np.mean(x2);s2 = np.std(x2)
-        x1 = (x1-m1)/s1
-        x2 = (x2-m2)/s2
-    
-    x1_fft = np.fft.fft(x1)
-    x2_fft = np.fft.fft(x2)
-    ccf = np.fft.ifft(x2_fft.conj() * x1).real
-
     if return_lag:
-        lag = np.argmax(ccf)
         return np.max(ccf), lag
     else: return np.max(ccf)
 
@@ -529,6 +521,8 @@ def score_lag_mat(observations, score_fn = alignment_similarity_linear):
         for i in range(j):
             score, lag = score_fn(observations[:,i], observations[:,j], return_lag=True)
             scores[i,j] = scores[j,i] = score
+            if lag >= L//2 + 1:
+                    lag -= L
             lags[i,j] = lag
             lags[j,i] = -lag
     
