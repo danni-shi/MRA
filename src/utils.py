@@ -408,6 +408,17 @@ def align_classes(clustering1, clustering2):
 
     return clustering1
             
+def mixing_prob(classes, K):
+    """return the mixing probabilities of samples from class labels and the number of classes. If a class contains no samples, the probabilty is zero.
+
+    Args:
+        classes (_type_): class labels of samples
+        K (_type_): suppposed number of classes
+    """
+    p_est = np.zeros(K)
+    for c in np.unique(classes):
+        p_est[c] = np.mean(classes==c)
+    return p_est
 
 def assign_classes(observation, X_est):
     """assign observations to reference signals based on highest linear cross correlation

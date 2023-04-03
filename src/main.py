@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import time
 from tqdm import tqdm
-
+import os
 from sklearn.cluster import SpectralClustering, KMeans
 from sklearn.metrics.cluster import adjusted_rand_score
 import scipy.io as spio
@@ -20,31 +20,44 @@ import alignment
 # ======= initialisation ===========
 # intialise parameters
 sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise
-# sigma_range = [0.3,0.4,1.3]
+# sigma_range = [1.1]
 max_shift= 0.1 # max proportion of lateral shift
-K_range = [2]
+K_range = [2,3,4]
+# K_range = [4]
 # n = 200 # number of observations we evaluate
 
 # data path
 data_path = '../data_n=500/'
-labels = {'pairwise': 'SPC',
-            'spc': 'SPC-IVF',
-            'het': 'IVF'}
-result = {}
-
+performance = {}
+signal_estimates = {}
+classes_estimates = {}
+p_estimates = {}
+estimates = {}
 #===== calculatations over a grid of K and sigma ===========
 
 for k in tqdm(K_range):
     # iniitialise containers
     ARI_list = []
     ARI_list_spc = []
+    
     error_list_pair = []
     acc_list_pair = []
+    
+    error_list_sync = []
+    acc_list_sync = []
+    
     error_list_spc = []
     acc_list_spc = []
+    
     error_list_het = []
     acc_list_het = []
 
+    # signal_estimates[f'K={k}'] = {}
+    # classes_estimates[f'K={k}'] = {}
+    # p_estimates[f'K={k}'] = {}
+    
+    estimates[f'K={k}'] = {}
+    
     j = 0
     
     for sigma in tqdm(sigma_range):
@@ -69,59 +82,50 @@ for k in tqdm(K_range):
         if j == 0:
             print('length and size of observations: ', observations.shape)
             j += 1
-            
-        # baseline clustering method
         
+        #--------- Clustering ----------#
+        
+        # baseline clustering method, obtain lag matrix from pairwise CCF
         affinity_matrix, lag_matrix = utils.score_lag_mat(observations,score_fn=utils.alignment_similarity)
-        # lag_matrix_test = alignment.get_lag_matrix(observations)
-        # print(np.linalg.norm(lag_matrix-alignment.lag_vec_to_mat(shifts)))
-        # print(np.linalg.norm(lag_matrix_test-alignment.lag_vec_to_mat(shifts)))
         SPC = SpectralClustering(n_clusters=k,
                                 affinity = 'precomputed',
                                 random_state=0).fit(affinity_matrix)
+        
+        # compare baseline and IVF clustering
         classes_spc = SPC.labels_
         classes_est = np.apply_along_axis(lambda x: utils.assign_classes(x, X_est), 0, observations)
-        classes_spc_aligned = utils.align_classes(classes_spc,classes_true)
-        classes_est_aligned = utils.align_classes(classes_est,classes_true)
-        assert np.sum(classes_spc_aligned==classes_true) >= np.sum(classes_spc==classes_true)
-        assert np.sum(classes_est_aligned==classes_true) >= np.sum(classes_est==classes_true)
+        # classes_spc_aligned = utils.align_classes(classes_spc,classes_true)
+        # classes_est_aligned = utils.align_classes(classes_est,classes_true)
+        # assert np.sum(classes_spc_aligned==classes_true) >= np.sum(classes_spc==classes_true)
+        # assert np.sum(classes_est_aligned==classes_true) >= np.sum(classes_est==classes_true)
         
         ARI_list_spc.append(adjusted_rand_score(classes_true, classes_spc))
         ARI_list.append(adjusted_rand_score(classes_true, classes_est))
 
         #----- Evaluate the lag estimation methods -----#
+        
         # ground truth pairwise lag matrix
         lag_mat_true = alignment.lag_vec_to_mat(shifts)
         
         # SPC + pairwaise correlation-based lags
-        rel_error_pair, accuracy_pair = alignment.eval_lag_mat_het(lag_matrix, lag_mat_true,classes_spc_aligned, classes_true)
+        rel_error_pair, accuracy_pair = alignment.eval_lag_mat_het(lag_matrix, lag_mat_true,classes_spc, classes_true)
         
-        rel_error_pair_0, accuracy_pair_0 = alignment.eval_lag_mat_het(lag_matrix, lag_mat_true,classes_spc, classes_true)
-        print(rel_error_pair_0-rel_error_pair)
-        print(accuracy_pair_0-accuracy_pair)
+        # rel_error_pair_0, accuracy_pair_0 = alignment.eval_lag_mat_het(lag_matrix, lag_mat_true,classes_spc_aligned, classes_true)
+        # print(rel_error_pair_0-rel_error_pair)
+        # print(accuracy_pair_0-accuracy_pair)
         
         error_list_pair.append(rel_error_pair)
         acc_list_pair.append(accuracy_pair)
        
  
         # SPC + synchronization
-        X_spc_est = np.zeros(X_true.shape)
-            
-        for c in np.unique(classes_spc):
-            # copmpute the synchronized lags
-            sub_lag_matrix = lag_matrix[classes_spc == c][:,classes_spc == c]
-            start = time.time()
-            pi, r, _ = alignment.SVD_NRS(sub_lag_matrix)
-            print(f'Time to run SVD-NRS = {time.time()-start:.5f}s.')
-            r_rounded = np.array(np.round(r), dtype=int)
-            r_rounded -= min(r_rounded) # make the relative lags start from zero
-            # compute the cluster average X
-            sub_observations = observations.T[classes_spc == c].T
-            X_spc_est[:,c] = alignment.synchronize(sub_observations, r_rounded)
+        X_est_sync = alignment.get_synchronized_signals(observations, classes_spc, lag_matrix)
         
-        rel_error_spc_pair, accuracy_spc_pair = \
-            alignment.eval_alignment_het(observations, shifts, classes_spc, X_spc_est)
-        # TODO: change the accuracy and error calculations for eval_alignment_het
+        rel_error_sync, accuracy_sync = \
+            alignment.eval_alignment_het(observations, shifts, classes_spc, X_est_sync)
+        
+        error_list_sync.append(rel_error_sync)
+        acc_list_sync.append(accuracy_sync)
         
         # SPC + homogeneous optimization
         rel_error_spc, accuracy_spc, X_est_spc = \
@@ -137,6 +141,48 @@ for k in tqdm(K_range):
         error_list_het.append(rel_error_het)
         acc_list_het.append(accuracy_het)
         
+        # aligned the estimated signals and mixing probabilities to the ground truth
+        X_est_sync_aligned, perm = utils.align_to_ref_het(X_est_sync, X_true)
+        
+        X_est_spc_aligned, perm = utils.align_to_ref_het(X_est_spc, X_true)
+        prob_spc = utils.mixing_prob(classes_spc, k)
+        prob_spc = np.array([prob_spc[i] for i in perm])
+
+        # reminder that the estimations from hetergeneous IVF method is alreadly aligned with the truth
+        prob_het_reasigned = utils.mixing_prob(classes_est, k)    
+        
+        # true mxiing probabilities
+        P_true = [np.mean(classes_true == c) for c in np.unique(classes_true)]
+        
+        # record estimations for each K and sigma
+        estimates[f'K={k}'][f'sigma={sigma:.2g}'] = {
+            'signals': {'true': X_true,
+                        'sync': X_est_sync_aligned,
+                        'spc': X_est_spc_aligned,
+                        'het':X_est
+                        } ,
+            'classes': {'true': classes_true,
+                        'spc': classes_spc,
+                        'het': classes_est  
+                        },
+            'probabilities': {'true': P_true,
+                            'spc': prob_spc,
+                            'het reassigned': prob_het_reasigned,
+                            'het': P_est
+                             }
+        }
+        
+        # signal_estimates[f'K={k}'][f'sigma={sigma:.2g}'] = \
+        #                             {'true': X_true,
+        #                             'sync': X_est_sync,
+        #                             'spc': X_est_spc,
+        #                             'het':X_est
+        #                             }    
+        
+        # classes_estimates[f'K={k}'][f'sigma={sigma:.2g}'] = \
+        #                             {'spc': classes_spc,
+        #                             'het': classes_est,
+        #                             'true': classes_true}
 
         # if sigma % 0.5 < 1:
         #     # plot the difference of estimated signals
@@ -162,41 +208,89 @@ for k in tqdm(K_range):
         #     j += 1
     
     # store results
-    result[f'K={k}'] = {'classes' :{'spc': classes_spc,
-                                    'het': classes_est,
-                                    'true': classes_true},
+    performance[f'K={k}'] = {
                         'ARI'     : {'spc': ARI_list_spc,
                                     'het': ARI_list},
                         'error'   : {'pairwise': error_list_pair,
+                                     'sync': error_list_sync,
                                     'spc': error_list_spc,
                                     'het': error_list_het},
                         'accuracy': {'pairwise': acc_list_pair,
+                                     'sync': acc_list_sync,
                                     'spc': acc_list_spc,
-                                    'het': acc_list_het}            
+                                    'het': acc_list_het}      
                             }
+    
 # save the results
-with open('../results/clustering.pkl', 'wb') as f:   
-        pickle.dump(result, f)
-        
+with open('../results/performance.pkl', 'wb') as f:   
+        pickle.dump(performance, f)
+
+with open('../results/estimates.pkl', 'wb') as f:   
+    pickle.dump(estimates, f)
+
+# with open('../results/clustering.pkl', 'rb') as f:   
+#         result = pickle.load(f)
+    
 #======== plot the results ==================
 
-results_save_dir = utils.save_to_folder('../plots/SPC_cluster', '')
-for k in K_range: 
-    fig, axes = plt.subplots(3,1, figsize = (15,18), squeeze=False)
-    ax = axes.flatten()
-    plot_list = ['ARI', 'error', 'accuracy']
-    
-    for i in range(len(plot_list)):
-        for key, result_list in result[f'K={k}'][plot_list[i]].items():
-            ax[i].plot(sigma_range, result_list, label = labels[key])
-        ax[i].grid()
-        ax[i].legend()
-        ax[i].set_xlabel('std of added noise')
+# labels = {'pairwise': 'SPC',
+#           'sync': 'SPC-Synchronization',
+#             'spc': 'SPC-IVF',
+#             'het': 'IVF',
+#             'true': 'True'}
+# color_labels = labels.keys()
+# col_values = sns.color_palette('Set2')
+# color_map = dict(zip(color_labels, col_values))
 
-    ax[0].set_title(f'Ajusted Rand Index of clustering against noise level, K = {k}')
-    ax[1].set_title(f'Change of Alignment Error with Noise Level')
-    ax[2].set_title(f'Change of Alignment Accuracy with Noise Level')
-    plt.savefig(results_save_dir + f'/acc_err_ARI_K={k}_0')
+# lty_map = {'sync': 'dotted',
+#             'spc': 'dashdot',
+#             'het': 'dashed',
+#             'true': 'solid'}
+
+# results_save_dir = utils.save_to_folder('../plots/SPC_cluster', '')
+# for k in K_range: 
+#     fig, axes = plt.subplots(3,1, figsize = (15,18), squeeze=False)
+#     ax = axes.flatten()
+#     plot_list = ['ARI', 'error', 'accuracy']
+    
+#     for i in range(len(plot_list)):
+#         for key, result_list in performance[f'K={k}'][plot_list[i]].items():
+#             ax[i].plot(sigma_range, result_list, label = labels[key], color = color_map[key])
+#         ax[i].grid()
+#         ax[i].legend()
+#         ax[i].set_xlabel('std of added noise')
+#     ax[0].set_title(f'Ajusted Rand Index of clustering against noise level, K = {k}')
+#     ax[1].set_title(f'Change of Alignment Error with Noise Level')
+#     ax[2].set_title(f'Change of Alignment Accuracy with Noise Level')
+#     plt.savefig(results_save_dir + f'/acc_err_ARI_K={k}')
+    
+    # # plot signal estimates
+    # results_save_dir_2 = results_save_dir + f'/signal_estimates_K={k}'
+    # os.makedirs(results_save_dir_2)
+    # # plot the difference of estimated signals
+    # fig, ax = plt.subplots(k, 1, figsize = (10,5*k))
+    # for key, X_estimates in result[f'K={k}']['signals'].items():
+    #     if key != 'true':
+    #         X_estimates, perm = utils.align_to_ref_het(X_estimates, X_true)
+        
+    #     rel_errors = []
+    #     for j in range(k):
+    #         rel_err = np.linalg.norm(X_estimates[:,j]-X_true[:,j])/np.linalg.norm(X_true[:,j])
+    #         rel_errors.append(rel_err)
+    #         p_true = np.sum(classes_true==j)/observations.shape[1]
+    #         ax[j].plot(X_estimates[:,j], label = labels[key], color = color_map[key], linestyle = lty_map[key])
+    # # color_map = dict(zip(color_labels, col_values))
+    # # for j in range(k):
+    # #     ax[j].set_title(f'rel. err.:  hetero {rel_err_hetero:.2f}; '\
+    # #                     f'spc {rel_err_spc:.2f}; '\
+    # #                     f'true p: {p_true:.2f}, '\
+    # #                     f'est. p: {P_est[i]:.2f}')
+    #     ax[j].grid()
+    #     ax[j].legend()
+
+    #     fig.suptitle(f'Comparison of the True and Estimated Signals, K = {k}, noise = {sigma:.2g}')
+    #     plt.savefig(results_save_dir_2 + f'/sigma={sigma:.2g}')
+    
     
 
 

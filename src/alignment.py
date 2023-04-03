@@ -212,16 +212,14 @@ def eval_alignment(observations, shifts, sigma, X_est = None):
     
     # evaluate error and accuracy
     norm = np.linalg.norm(lag_mat_true,1)
-    mean_error = np.linalg.norm(lag_mat - lag_mat_true,1)/norm
-    accuracy = np.mean(abs(lag_mat - lag_mat_true) < 0.1) * 100
-    mean_error_0 = np.linalg.norm(lag_mat_0 - lag_mat_true,1)/norm
-    accuracy_0 = np.mean(abs(lag_mat_0 - lag_mat_true)< 0.1) * 100
+    rel_error, accuracy = eval_lag_mat(lag_mat, lag_mat_true)
+    rel_error_0, accuracy_0 = eval_lag_mat(lag_mat_0, lag_mat_true)
     
-    return mean_error, accuracy, mean_error_0, accuracy_0, X_est
+    return rel_error, accuracy, rel_error_0, accuracy_0, X_est
 
 
 
-def eval_alignment_het(observations, shifts, classes_est = None, X_est = None, sigma = None):
+def eval_alignment_het(observations, shifts, classes = None, X_est = None, sigma = None):
     """compare the performance of lead-lag predition using intermidiate latent signal to naive pairwise prediciton
 
     Args:
@@ -235,25 +233,24 @@ def eval_alignment_het(observations, shifts, classes_est = None, X_est = None, s
         accuracy_0: accuracy of naive approach
 
     """
-    L, N = observations.shape
     # initialization
-    mean_error = accuracy = 0
+    rel_error = accuracy = 0
     # assign observations to the closest cluster centre
-    if classes_est is None:
+    if classes is None:
         assert X_est != None, 'Cannot assign classes without cluster signals'
-        classes_est = np.apply_along_axis(lambda x: utils.assign_classes(x, X_est), 0, observations)
+        classes = np.apply_along_axis(lambda x: utils.assign_classes(x, X_est), 0, observations)
     
     if X_est is None:
         X_est_list = []
     # evaluate the lag estimation for each cluster
-    for c in np.unique(classes_est):
+    for c in np.unique(classes):
         
         # calculate true lags
-        sub_shifts = shifts[classes_est == c]
+        sub_shifts = shifts[classes == c]
         lag_mat_true = lag_vec_to_mat(sub_shifts)
         
         # estimate lags from data
-        sub_observations = observations.T[classes_est == c].T
+        sub_observations = observations.T[classes == c].T
         if X_est is None:
             # estimate and align to signal
             sub_X_est, _, _ = optimization.optimise_matlab(sub_observations, sigma, 1)
@@ -265,16 +262,17 @@ def eval_alignment_het(observations, shifts, classes_est = None, X_est = None, s
         # lag_mat_0 = get_lag_matrix(sub_observations)
         
         # evaluate error and accuracy, weighted by cluster size
-        norm = np.linalg.norm(lag_mat_true,1)
-        mean_error += sub_observations.shape[1]/N * np.linalg.norm(lag_mat - lag_mat_true, 1)/norm 
-        accuracy += sub_observations.shape[1]/N * np.mean(abs(lag_mat - lag_mat_true) < 0.1) * 100
+        class_error, class_accuracy = eval_lag_mat(lag_mat,lag_mat_true)
+        weight = len(sub_shifts)/len(classes)
+        rel_error += class_error * weight
+        accuracy += class_accuracy * weight
     
     
     if X_est is None:
         X_est = np.concatenate(X_est_list,axis=1)
-        return mean_error, accuracy, X_est
+        return rel_error, accuracy, X_est
     else:
-        return  mean_error, accuracy
+        return  rel_error, accuracy
 
 #---- Implementation of SVD-Synchronization ----#
 def reconcile_score_signs(H,r, G=None):
@@ -370,7 +368,7 @@ def shift(X, shifts, cyclic = False):
         if not cyclic:
             # y[:k] = np.random.normal(0, 1, size = k)
             if k < 0:
-                y[L+k:L] = np.zeros(k)
+                y[L+k:L] = np.zeros(-k)
             else:
                 y[:k] = np.zeros(k)
         data[:,i] = y
@@ -390,6 +388,29 @@ def synchronize(X, shifts, cyclic = False):
     X_shifted = shift(X, -shifts, cyclic = cyclic)
     
     return X_shifted.mean(axis = 1)
+
+def get_synchronized_signals(observations, classes, lag_matrix, max_lag = None):
+    # initialize
+    L = observations.shape[0]
+    K = len(np.unique(classes))
+    X_est = np.zeros((L,K))
+    
+    if not max_lag:
+        max_lag = int(0.2*L)
+        
+    # synchronize the samples in each class
+    for c in np.unique(classes):
+        # copmpute the synchronized lags
+        sub_lag_matrix = lag_matrix[classes == c][:,classes == c]
+        start = time.time()
+        pi, r, _ = SVD_NRS(sub_lag_matrix)
+        r_rounded = np.array(np.round(r), dtype=int)
+        # r_rounded -= min(r_rounded) # make the relative lags start from zero
+        # compute the cluster average X
+        sub_observations = observations.T[classes == c][abs(r_rounded) <= max_lag].T
+        X_est[:,c] = synchronize(sub_observations, r_rounded[abs(r_rounded) <= max_lag])
+
+    return X_est
 
 def align_plot():
     # intialise parameters for generating observations
