@@ -107,11 +107,11 @@ def get_lag_mat_het(observations, ref = None, classes = None):
     pass
 
 def eval_lag_mat(lag_mat, lag_mat_true):
-    """compute the relative error and accuracy of a lag matrix wrt to a ground truth lag matrix
+    """compute the relative error and accuracy of a lag matrix wrt to a ground truth lag matrix.
 
     Args:
-        lag_mat (_type_): _description_
-        lag_mat_true (_type_): _description_
+        lag_mat (nxn array): _description_
+        lag_mat_true (nxn array): _description_
 
     Returns:
         _type_: _description_
@@ -120,13 +120,15 @@ def eval_lag_mat(lag_mat, lag_mat_true):
         np.count_nonzero(np.array(lag_mat_true.shape) != 1) == 1:
         lag_mat_true = lag_vec_to_mat(lag_mat_true)
     
-    N = lag_mat_true.shape[0]
-    np.fill_diagonal(lag_mat, np.nan)
-    diff_mat = lag_mat - lag_mat_true
+    # skew-symmetric matrices, we only need the upper triangle
+    lag_mat_true_u = np.triu(lag_mat_true, k=1)
+    lag_mat_u = np.triu(lag_mat, k=1)
+    # np.fill_diagonal(lag_mat, np.nan)
+    diff_mat = lag_mat_u - lag_mat_true_u
+    
     rel_error = np.sum(abs(diff_mat[~np.isnan(diff_mat)]))
-    rel_error /= np.sum(abs(lag_mat_true[~np.isnan(lag_mat_true)]))
-    # ignore the diagonal entries 
-    accuracy = np.sum(abs(diff_mat[~np.isnan(diff_mat)]) < 0.1)/(N**2-N) * 100
+    rel_error /= np.sum(abs(lag_mat_true_u[~np.isnan(lag_mat_true_u)]))
+    accuracy = np.sum(abs(diff_mat[~np.isnan(diff_mat)]) < 0.1)/len(diff_mat) * 100
     
     return rel_error, accuracy
 
@@ -165,24 +167,45 @@ def eval_lag_mat_het(lag_mat, lag_mat_true, classes, classes_true):
         np.count_nonzero(np.array(lag_mat_true.shape) != 1) == 1:
         lag_mat_true = lag_vec_to_mat(lag_mat_true)
     
-    # mask th irrelavant entries with nan
+    # # mask th irrelavant entries with nan
+    # lag_mat = lag_mat_post_clustering(lag_mat, classes)
+    # lag_mat_true = lag_mat_post_clustering(lag_mat_true, classes_true)
+    # # calculate scale
+    # N = lag_mat_true.shape[0]
+    # # number of valid lags for evaluation
+    # tol_count_val = np.count_nonzero(~np.isnan(lag_mat-lag_mat_true))
+    # tol_count_true = np.count_nonzero(~np.isnan(lag_mat_true))
+    # count_diff = tol_count_true - tol_count_val
+    # assert count_diff >= 0
+    # diff_mat = lag_mat - lag_mat_true
+    # # if the cluster assignment is wrong, add error = assumed max shift
+    # penalty = np.nanmax(abs(lag_mat_true))
+    # rel_error = np.sum(abs(diff_mat[~np.isnan(diff_mat)])) + penalty * count_diff
+    # rel_error /= np.sum(abs(lag_mat_true[~np.isnan(lag_mat_true)]))
+    # # ignore the diagonal entries 
+    # accuracy = np.sum(abs(diff_mat[~np.isnan(diff_mat)]) < 0.1)/tol_count_true * 100
+    # calculate the proportion of valid entries
+    
+    # initialization
+    rel_error = accuracy = 0
+    
     lag_mat = lag_mat_post_clustering(lag_mat, classes)
     lag_mat_true = lag_mat_post_clustering(lag_mat_true, classes_true)
-    # calculate scale
-    N = lag_mat_true.shape[0]
-    # number of valid lags for evaluation
-    tol_count_val = np.count_nonzero(~np.isnan(lag_mat-lag_mat_true))
-    tol_count_true = np.count_nonzero(~np.isnan(lag_mat_true))
-    count_diff = tol_count_true - tol_count_val
-    assert count_diff >= 0
-    diff_mat = lag_mat - lag_mat_true
-    # if the cluster assignment is wrong, add error = assumed max shift
-    penalty = np.nanmax(abs(lag_mat_true))
-    rel_error = np.sum(abs(diff_mat[~np.isnan(diff_mat)])) + penalty * count_diff
-    rel_error /= np.sum(abs(lag_mat_true[~np.isnan(lag_mat_true)]))
-    # ignore the diagonal entries 
-    accuracy = np.sum(abs(diff_mat[~np.isnan(diff_mat)]) < 0.1)/tol_count_true * 100
-    # calculate the proportion of valid entries
+    for c in np.unique(classes):
+        
+        # calculate true lags
+        sub_lag_mat_true = lag_mat_true[classes == c][:,classes == c]
+        sub_lag_mat = lag_mat[classes == c][:,classes == c]
+        n_nan= np.count_nonzero(np.isnan(sub_lag_mat))
+        assert n_nan == len(sub_lag_mat), f'{n_nan} null values in predictions'
+        # lag_mat_0 = get_lag_matrix(sub_observations)
+        
+        # evaluate error and accuracy, weighted by cluster size
+        class_error, class_accuracy = eval_lag_mat(sub_lag_mat,sub_lag_mat_true)
+        weight = len(sub_lag_mat)/len(classes)
+        rel_error += class_error * weight
+        accuracy += class_accuracy * weight
+
     return rel_error, accuracy
 
 def eval_alignment(observations, shifts, sigma, X_est = None):
@@ -219,7 +242,7 @@ def eval_alignment(observations, shifts, sigma, X_est = None):
 
 
 
-def eval_alignment_het(observations, shifts, classes = None, X_est = None, sigma = None):
+def eval_alignment_het(observations, lag_mat_true, classes = None, classes_true = None,  X_est = None, sigma = None):
     """compare the performance of lead-lag predition using intermidiate latent signal to naive pairwise prediciton
 
     Args:
@@ -242,12 +265,14 @@ def eval_alignment_het(observations, shifts, classes = None, X_est = None, sigma
     
     if X_est is None:
         X_est_list = []
+    
+    # mask to nan the irrelevant entries
+    lag_mat_true_processed = lag_mat_post_clustering(lag_mat_true, classes_true)
     # evaluate the lag estimation for each cluster
     for c in np.unique(classes):
         
         # calculate true lags
-        sub_shifts = shifts[classes == c]
-        lag_mat_true = lag_vec_to_mat(sub_shifts)
+        sub_lag_mat_true = lag_mat_true_processed[classes == c][:,classes == c]
         
         # estimate lags from data
         sub_observations = observations.T[classes == c].T
@@ -257,13 +282,13 @@ def eval_alignment_het(observations, shifts, classes = None, X_est = None, sigma
             X_est_list.append(sub_X_est.reshape(-1,1))
         else:
             sub_X_est = X_est[:,c]
-        lag_mat = get_lag_matrix(sub_observations, sub_X_est)
+        sub_lag_mat = get_lag_matrix(sub_observations, sub_X_est)
         
         # lag_mat_0 = get_lag_matrix(sub_observations)
         
         # evaluate error and accuracy, weighted by cluster size
-        class_error, class_accuracy = eval_lag_mat(lag_mat,lag_mat_true)
-        weight = len(sub_shifts)/len(classes)
+        class_error, class_accuracy = eval_lag_mat(sub_lag_mat,sub_lag_mat_true)
+        weight = len(sub_lag_mat)/len(classes)
         rel_error += class_error * weight
         accuracy += class_accuracy * weight
     

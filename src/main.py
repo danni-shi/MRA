@@ -20,10 +20,10 @@ import alignment
 # ======= initialisation ===========
 # intialise parameters
 sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise
-# sigma_range = [1.1]
+# sigma_range = [0.1,1.1,1.9]
 max_shift= 0.1 # max proportion of lateral shift
 K_range = [2,3,4]
-# K_range = [4]
+#K_range = [2]
 # n = 200 # number of observations we evaluate
 
 # data path
@@ -106,6 +106,7 @@ for k in tqdm(K_range):
         
         # ground truth pairwise lag matrix
         lag_mat_true = alignment.lag_vec_to_mat(shifts)
+    
         
         # SPC + pairwaise correlation-based lags
         rel_error_pair, accuracy_pair = alignment.eval_lag_mat_het(lag_matrix, lag_mat_true,classes_spc, classes_true)
@@ -122,21 +123,21 @@ for k in tqdm(K_range):
         X_est_sync = alignment.get_synchronized_signals(observations, classes_spc, lag_matrix)
         
         rel_error_sync, accuracy_sync = \
-            alignment.eval_alignment_het(observations, shifts, classes_spc, X_est_sync)
+            alignment.eval_alignment_het(observations, lag_mat_true, classes_spc, classes_true, X_est_sync)
         
         error_list_sync.append(rel_error_sync)
         acc_list_sync.append(accuracy_sync)
         
         # SPC + homogeneous optimization
         rel_error_spc, accuracy_spc, X_est_spc = \
-            alignment.eval_alignment_het(observations, shifts, classes_spc, sigma = sigma)
+            alignment.eval_alignment_het(observations, lag_mat_true, classes_spc, classes_true, sigma = sigma)
         
         error_list_spc.append(rel_error_spc)
         acc_list_spc.append(accuracy_spc)
         
         # heterogeneous optimization
         rel_error_het, accuracy_het = \
-            alignment.eval_alignment_het(observations, shifts, classes_est, X_est)
+            alignment.eval_alignment_het(observations, lag_mat_true, classes_est, classes_true, X_est)
         
         error_list_het.append(rel_error_het)
         acc_list_het.append(accuracy_het)

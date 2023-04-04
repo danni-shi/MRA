@@ -12,7 +12,8 @@ os.chdir(dname)
 #----- Check these parameters are in sync with main.py -----#
 sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise
 K_range = [2,3,4]
-
+# sigma_range = [1.1]
+# K_range = [2]
 with open('../results/performance.pkl', 'rb') as f:   
         performance = pickle.load(f)
 
