@@ -84,11 +84,11 @@ for k in K_range:
             rel_errors_str = []
             p_est_str = []
             for key, X_estimates in estimates_i['signals'].items():
-                if key != 'true':
-                    ax[j].plot(X_estimates[:,j], \
+                ax[j].plot(X_estimates[:,j], \
                             label = labels[key], \
                             color = color_map[key], \
                             linestyle = lty_map[key])
+                if key != 'true':
                     rel_err = np.linalg.norm(X_estimates[:,j]-X_true[:,j])/np.linalg.norm(X_true[:,j])
                     rel_errors_str.append( f'{labels[key]} {rel_err:.3f}')
                     
