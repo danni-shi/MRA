@@ -10,22 +10,27 @@ dname = os.path.dirname(abspath)
 os.chdir(dname)
 
 #----- Check these parameters are in sync with main.py -----#
-sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise
-K_range = [2,3,4]
-# sigma_range = [1.1]
-# K_range = [2]
+test = False
+if test:
+    sigma_range = np.arange(0.1,2.1,1) # std of random gaussian noise
+    K_range = [2]
+else:
+    sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise
+    K_range = [2,3,4]
+
+# read saved results
 with open('../results/performance.pkl', 'rb') as f:   
         performance = pickle.load(f)
 
 with open('../results/estimates.pkl', 'rb') as f:   
     estimates = pickle.load(f)
     
-
-#======== plot the results ==================
-
-labels = {'pairwise': 'SPC',
+#=================== plot the results ==================#
+# labels and formats
+labels = {'pairwise': 'SPC-Pairwise',
           'sync': 'SPC-Sync',
-            'spc': 'SPC-IVF',
+            'spc-homo': 'SPC-IVF',
+            'spc': 'SPC',
             'het': 'IVF',
             'het reassigned': 'IVF (regroup)',
             'true': 'True'}
@@ -103,6 +108,7 @@ for k in K_range:
 
         fig.suptitle(f'Comparison of the True and Estimated Signals, K = {k}, noise = {sigma:.2g}')
         plt.savefig(results_save_dir_2 + f'/K={k}/{int(i)}')
+        plt.close()
         i+=1
     
     

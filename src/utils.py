@@ -11,6 +11,7 @@ from autograd import jacobian
 from scipy.optimize import linear_sum_assignment
 from scipy import signal
 
+
 def get_dataset(type, ticker, date, nlevels, start = '34200000', end = '57600000'):
     """ Return LOBSTER intra-day dataset based on the default naming style
 
@@ -162,6 +163,7 @@ def generate_data_het(x, num_copies, max_shift = 0.1, sigma = 0.1, cyclic = True
     data, shifts, classes = random_shift_het(x, num_copies, cyclic, max_shift, seed)
     data = random_noise(data, sigma, seed)
     return data, shifts, classes
+
 
 def power_spectrum(x):
     """return the power spectrum of a signal
@@ -393,7 +395,7 @@ def align_classes(clustering1, clustering2):
     """
     K1 = len(np.unique(clustering1))
     K2 = len(np.unique(clustering2))
-    assert K1 == K2, 'clusterings have different number of groups'
+    # assert K1 == K2, 'clusterings have different number of groups'
     cost_mat = np.zeros((K1,K2))
     for i in range(K1):
         for j in range(K2):

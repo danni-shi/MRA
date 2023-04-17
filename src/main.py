@@ -4,28 +4,27 @@ Compare the accuracy of lag recovery between the two methods
 #======== imports ===========
 import numpy as np
 import pickle
-import matplotlib.pyplot as plt
-import seaborn as sns
-import time
 from tqdm import tqdm
 import os
 from sklearn.cluster import SpectralClustering, KMeans
 from sklearn.metrics.cluster import adjusted_rand_score
 import scipy.io as spio
-from scipy.linalg import block_diag
+# from scipy.linalg import block_diag
 
 import utils
 import alignment
 
+test = False
 # ======= initialisation ===========
 # intialise parameters
-sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise
-# sigma_range = [0.1,1.1,1.9]
-max_shift= 0.1 # max proportion of lateral shift
-K_range = [2,3,4]
-#K_range = [2]
+if test:
+    sigma_range = np.arange(0.1,2.1,1) # std of random gaussian noise
+    K_range = [2]
+else:
+    sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise
+    K_range = [2,3,4]
 # n = 200 # number of observations we evaluate
-
+max_shift= 0.1 # max proportion of lateral shift
 # data path
 data_path = '../data_n=500/'
 performance = {}
@@ -94,10 +93,12 @@ for k in tqdm(K_range):
         # compare baseline and IVF clustering
         classes_spc = SPC.labels_
         classes_est = np.apply_along_axis(lambda x: utils.assign_classes(x, X_est), 0, observations)
-        # classes_spc_aligned = utils.align_classes(classes_spc,classes_true)
-        # classes_est_aligned = utils.align_classes(classes_est,classes_true)
-        # assert np.sum(classes_spc_aligned==classes_true) >= np.sum(classes_spc==classes_true)
-        # assert np.sum(classes_est_aligned==classes_true) >= np.sum(classes_est==classes_true)
+        classes_spc_aligned = utils.align_classes(classes_spc,classes_true)
+        classes_est_aligned = utils.align_classes(classes_est,classes_true)
+        assert np.sum(classes_spc_aligned==classes_true) >= np.sum(classes_spc==classes_true)
+        assert np.sum(classes_est_aligned==classes_true) >= np.sum(classes_est==classes_true)
+        classes_spc = classes_spc_aligned
+        classes_est = classes_est_aligned
         
         ARI_list_spc.append(adjusted_rand_score(classes_true, classes_spc))
         ARI_list.append(adjusted_rand_score(classes_true, classes_est))
@@ -106,10 +107,10 @@ for k in tqdm(K_range):
         
         # ground truth pairwise lag matrix
         lag_mat_true = alignment.lag_vec_to_mat(shifts)
-    
+        error_penalty = int(observations.shape[0]/2)
         
         # SPC + pairwaise correlation-based lags
-        rel_error_pair, accuracy_pair = alignment.eval_lag_mat_het(lag_matrix, lag_mat_true,classes_spc, classes_true)
+        rel_error_pair, accuracy_pair = alignment.eval_lag_mat_het(lag_matrix, lag_mat_true,classes_spc, classes_true, error_penalty)
         
         # rel_error_pair_0, accuracy_pair_0 = alignment.eval_lag_mat_het(lag_matrix, lag_mat_true,classes_spc_aligned, classes_true)
         # print(rel_error_pair_0-rel_error_pair)
@@ -123,21 +124,21 @@ for k in tqdm(K_range):
         X_est_sync = alignment.get_synchronized_signals(observations, classes_spc, lag_matrix)
         
         rel_error_sync, accuracy_sync = \
-            alignment.eval_alignment_het(observations, lag_mat_true, classes_spc, classes_true, X_est_sync)
+            alignment.eval_alignment_het(observations, lag_mat_true, classes_spc, classes_true, X_est_sync, penalty=error_penalty)
         
         error_list_sync.append(rel_error_sync)
         acc_list_sync.append(accuracy_sync)
         
         # SPC + homogeneous optimization
         rel_error_spc, accuracy_spc, X_est_spc = \
-            alignment.eval_alignment_het(observations, lag_mat_true, classes_spc, classes_true, sigma = sigma)
+            alignment.eval_alignment_het(observations, lag_mat_true, classes_spc, classes_true, sigma = sigma, penalty=error_penalty)
         
         error_list_spc.append(rel_error_spc)
         acc_list_spc.append(accuracy_spc)
         
         # heterogeneous optimization
         rel_error_het, accuracy_het = \
-            alignment.eval_alignment_het(observations, lag_mat_true, classes_est, classes_true, X_est)
+            alignment.eval_alignment_het(observations, lag_mat_true, classes_est, classes_true, X_est, penalty=error_penalty)
         
         error_list_het.append(rel_error_het)
         acc_list_het.append(accuracy_het)
@@ -214,11 +215,11 @@ for k in tqdm(K_range):
                                     'het': ARI_list},
                         'error'   : {'pairwise': error_list_pair,
                                      'sync': error_list_sync,
-                                    'spc': error_list_spc,
+                                    'spc-homo': error_list_spc,
                                     'het': error_list_het},
                         'accuracy': {'pairwise': acc_list_pair,
                                      'sync': acc_list_sync,
-                                    'spc': acc_list_spc,
+                                    'spc-homo': acc_list_spc,
                                     'het': acc_list_het}      
                             }
     
