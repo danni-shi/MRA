@@ -9,8 +9,12 @@ abspath = os.path.abspath(__file__)
 dname = os.path.dirname(abspath)
 os.chdir(dname)
 
+###--- change folder name accroding to experiment specications ---###
+folder_name = 'logreturns_lag_error_penalty0'
+
 #----- Check these parameters are in sync with main.py -----#
 test = False
+
 if test:
     sigma_range = np.arange(0.1,2.1,1) # std of random gaussian noise
     K_range = [2]
@@ -44,11 +48,12 @@ lty_map = {'sync': 'dotted',
             'true': 'solid'}
 
 #--- plots of performance of different methods for lag estimatiopn ---#
-results_save_dir = utils.save_to_folder('../plots/SPC_cluster', '')
+results_save_dir = utils.save_to_folder('../plots/SPC_cluster', folder_name)
+
 for k in K_range: 
-    fig, axes = plt.subplots(3,1, figsize = (15,18), squeeze=False)
+    fig, axes = plt.subplots(4,1, figsize = (15,24), squeeze=False)
     ax = axes.flatten()
-    plot_list = ['ARI', 'error', 'accuracy']
+    plot_list = ['ARI',  'accuracy','error_sign']
     
     for i in range(len(plot_list)):
         for key, result_list in performance[f'K={k}'][plot_list[i]].items():
@@ -56,9 +61,24 @@ for k in K_range:
         ax[i].grid()
         ax[i].legend()
         ax[i].set_xlabel('std of added noise')
-    ax[0].set_title(f'Ajusted Rand Index of clustering against noise level, K = {k}')
-    ax[1].set_title(f'Change of Alignment Error with Noise Level')
-    ax[2].set_title(f'Change of Alignment Accuracy with Noise Level')
+
+    q = 0.90
+    for key, errors_list in performance[f'K={k}']['errors_list'].items():
+        mean = [np.mean(x) for x in errors_list]
+        
+        quantile_u = [np.quantile(x,0.5*(1+q)) for x in errors_list]
+        quantile_l = [np.quantile(x,0.5*(1-q)) for x in errors_list]
+        ax[3].plot(sigma_range, mean, label = labels[key], color = color_map[key])
+        ax[3].fill_between(sigma_range,quantile_u,quantile_l,color = color_map[key], alpha=0.5)
+        ax[3].grid(visible = True)
+        ax[3].legend()
+        ax[3].set_xlabel('std of added noise')
+        
+    ax[0].set_title(f'Ajusted Rand Index of Clustering, K = {k}')
+    ax[1].set_title(f'Lag Prediction Accuracy %')
+    ax[2].set_title(f'Average Direction Prediction Error')
+    ax[3].set_title(f'Average Lag Prediction Error (shaded area contains {q:.0%} of realisations)')
+    
     plt.savefig(results_save_dir + f'/acc_err_ARI_K={k}')
 
 #--- plots of signal estimates of different methods ---#

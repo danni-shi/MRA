@@ -18,7 +18,7 @@ test = False
 # ======= initialisation ===========
 # intialise parameters
 if test:
-    sigma_range = np.arange(0.1,2.1,1) # std of random gaussian noise
+    sigma_range = np.arange(1.5,2.1,0.2) # std of random gaussian noise
     K_range = [2]
 else:
     sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise
@@ -26,7 +26,10 @@ else:
 # n = 200 # number of observations we evaluate
 max_shift= 0.1 # max proportion of lateral shift
 # data path
-data_path = '../data_n=500/'
+data_path = '../../data/data500_logreturns_init3/'
+
+labels = ['pairwise', 'sync', 'spc-homo', 'het']
+metrics = ['error', 'error_sign', 'accuracy', 'errors_list']
 performance = {}
 signal_estimates = {}
 classes_estimates = {}
@@ -36,21 +39,30 @@ estimates = {}
 
 for k in tqdm(K_range):
     # iniitialise containers
-    ARI_list = []
-    ARI_list_spc = []
     
-    error_list_pair = []
-    acc_list_pair = []
+    performance[f'K={k}'] = {'ARI'     : {'spc': [],
+                                          'het': []}}
+    for metric in metrics:
+        performance[f'K={k}'][metric] = {label:[] for label in labels}
+    # ARI_list = []
+    # ARI_list_spc = []
     
-    error_list_sync = []
-    acc_list_sync = []
+    # error_list_pair = []
+    # acc_list_pair = []
+    # Errors_pair = []
     
-    error_list_spc = []
-    acc_list_spc = []
+    # error_list_sync = []
+    # acc_list_sync = []
+    # Errors_sync = []
     
-    error_list_het = []
-    acc_list_het = []
-
+    # error_list_spc = []
+    # acc_list_spc = []
+    # Errors_spc = []
+    
+    # error_list_het = []
+    # acc_list_het = []
+    # Errors_het = []
+    
     # signal_estimates[f'K={k}'] = {}
     # classes_estimates[f'K={k}'] = {}
     # p_estimates[f'K={k}'] = {}
@@ -100,49 +112,70 @@ for k in tqdm(K_range):
         classes_spc = classes_spc_aligned
         classes_est = classes_est_aligned
         
-        ARI_list_spc.append(adjusted_rand_score(classes_true, classes_spc))
-        ARI_list.append(adjusted_rand_score(classes_true, classes_est))
+        performance[f'K={k}']['ARI']['spc']\
+            .append(adjusted_rand_score(classes_true, classes_spc))
+        performance[f'K={k}']['ARI']['het']\
+            .append(adjusted_rand_score(classes_true, classes_est))
 
         #----- Evaluate the lag estimation methods -----#
         
         # ground truth pairwise lag matrix
         lag_mat_true = alignment.lag_vec_to_mat(shifts)
-        error_penalty = int(observations.shape[0]/2)
+        # error_penalty = int(observations.shape[0]/2)
+        error_penalty = 0
         
         # SPC + pairwaise correlation-based lags
-        rel_error_pair, accuracy_pair = alignment.eval_lag_mat_het(lag_matrix, lag_mat_true,classes_spc, classes_true, error_penalty)
-        
+        # rel_error_pair, rel_error_sign_pair, accuracy_pair, errors_pair = alignment.eval_lag_mat_het(lag_matrix, lag_mat_true,classes_spc, classes_true, error_penalty)
+        results_pair = alignment.eval_lag_mat_het(lag_matrix, lag_mat_true, \
+                                                classes_spc, classes_true,\
+                                                error_penalty)
         # rel_error_pair_0, accuracy_pair_0 = alignment.eval_lag_mat_het(lag_matrix, lag_mat_true,classes_spc_aligned, classes_true)
         # print(rel_error_pair_0-rel_error_pair)
         # print(accuracy_pair_0-accuracy_pair)
-        
-        error_list_pair.append(rel_error_pair)
-        acc_list_pair.append(accuracy_pair)
-       
+    
+        # acc_list_pair.append(accuracy_pair)
+        # Errors_pair.append(errors_pair)
  
         # SPC + synchronization
         X_est_sync = alignment.get_synchronized_signals(observations, classes_spc, lag_matrix)
         
-        rel_error_sync, accuracy_sync = \
-            alignment.eval_alignment_het(observations, lag_mat_true, classes_spc, classes_true, X_est_sync, penalty=error_penalty)
+        results_sync = \
+            alignment.eval_alignment_het(observations, lag_mat_true, \
+                                         classes_spc, classes_true, \
+                                        X_est_sync, penalty=error_penalty)
         
-        error_list_sync.append(rel_error_sync)
-        acc_list_sync.append(accuracy_sync)
+        # error_list_sync.append(rel_error_sync)
+        # acc_list_sync.append(accuracy_sync)
+        # Errors_sync.append(errors_sync)
         
         # SPC + homogeneous optimization
-        rel_error_spc, accuracy_spc, X_est_spc = \
-            alignment.eval_alignment_het(observations, lag_mat_true, classes_spc, classes_true, sigma = sigma, penalty=error_penalty)
-        
-        error_list_spc.append(rel_error_spc)
-        acc_list_spc.append(accuracy_spc)
+        results_spc = \
+            alignment.eval_alignment_het(observations, lag_mat_true, \
+                                        classes_spc, classes_true,\
+                                        sigma = sigma, penalty=error_penalty)
+        X_est_spc = results_spc[-1] 
+        results_spc = results_spc[:-1] 
+        # error_list_spc.append(rel_error_spc)
+        # acc_list_spc.append(accuracy_spc)
+        # Errors_spc.append(errors_spc)
         
         # heterogeneous optimization
-        rel_error_het, accuracy_het = \
-            alignment.eval_alignment_het(observations, lag_mat_true, classes_est, classes_true, X_est, penalty=error_penalty)
+        results_het = \
+            alignment.eval_alignment_het(observations, lag_mat_true, \
+                                        classes_est, classes_true, \
+                                        X_est, penalty=error_penalty)
         
-        error_list_het.append(rel_error_het)
-        acc_list_het.append(accuracy_het)
+        # error_list_het.append(rel_error_het)
+        # acc_list_het.append(accuracy_het)
+        # Errors_het.append(errors_het)
+        results_list = [results_pair,results_sync,results_spc,results_het]
         
+        for i in range(len(metrics)):
+            for j in range(len(labels)):
+                label = labels[j]
+                metric = metrics[i]
+                metric_result = results_list[j][i]
+                performance[f'K={k}'][metric][label].append(metric_result)
         # aligned the estimated signals and mixing probabilities to the ground truth
         X_est_sync_aligned, perm = utils.align_to_ref_het(X_est_sync, X_true)
         
@@ -210,18 +243,22 @@ for k in tqdm(K_range):
         #     j += 1
     
     # store results
-    performance[f'K={k}'] = {
-                        'ARI'     : {'spc': ARI_list_spc,
-                                    'het': ARI_list},
-                        'error'   : {'pairwise': error_list_pair,
-                                     'sync': error_list_sync,
-                                    'spc-homo': error_list_spc,
-                                    'het': error_list_het},
-                        'accuracy': {'pairwise': acc_list_pair,
-                                     'sync': acc_list_sync,
-                                    'spc-homo': acc_list_spc,
-                                    'het': acc_list_het}      
-                            }
+    # performance[f'K={k}'] = {
+    #                     'ARI'     : {'spc': ARI_list_spc,
+    #                                 'het': ARI_list},
+    #                     'error'   : {'pairwise': error_list_pair,
+    #                                  'sync': error_list_sync,
+    #                                 'spc-homo': error_list_spc,
+    #                                 'het': error_list_het},
+    #                     'Errors'  : {'pairwise': Errors_pair,
+    #                                  'sync': Errors_sync,
+    #                                 'spc-homo': Errors_spc,
+    #                                 'het': Errors_het},
+    #                     'accuracy': {'pairwise': acc_list_pair,
+    #                                  'sync': acc_list_sync,
+    #                                 'spc-homo': acc_list_spc,
+    #                                 'het': acc_list_het}      
+    #                         }
     
 # save the results
 with open('../results/performance.pkl', 'wb') as f:   
