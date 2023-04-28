@@ -334,7 +334,7 @@ def invariants_from_data_het(X, w = None, sigma = None, debias = False, verbose 
         print('time to estimate invariants from data = ', time.time() - start)
     return mean_est, P_est, B_est
 
-def align_to_ref(X, X_ref, return_ccf = False, normalised = True):
+def align_to_ref(X, X_ref, max_lag = None, return_ccf = False, normalised = True, centre_at_zero = True):
     """align the vector x after circularly shifting it such that it is optimally aligned with X_ref in 2-norm
 
     Args:
@@ -344,7 +344,8 @@ def align_to_ref(X, X_ref, return_ccf = False, normalised = True):
     X_ref = X_ref.flatten()
     X = X.flatten()
     L = len(X)
-    
+
+        
     if normalised:
         m1 = np.mean(X);s1 = np.std(X)
         m2 = np.mean(X_ref);s2 = np.std(X_ref)
@@ -354,10 +355,21 @@ def align_to_ref(X, X_ref, return_ccf = False, normalised = True):
     X_ref_fft = np.fft.fft(X_ref)
     X_fft = np.fft.fft(X)
     ccf = np.fft.ifft(X_ref_fft.conj() * X_fft).real
-    
-    lag = np.argmax(ccf)
-    if lag >= L//2 + 1:
-        lag -= L
+
+    if centre_at_zero:
+        if max_lag is None:
+            max_lag = L//2
+        lag = np.argmax(np.roll(ccf, shift=max_lag)[0:2 * max_lag]) - max_lag
+        assert abs(lag) <= max_lag, f'lag: {lag} > max lag: {max_lag}'
+    else:
+        if max_lag is None:
+            lag = np.argmax(ccf)
+        else:
+            lag = np.argmax(ccf[:max_lag])
+
+    # if lag >= L//2 + 1:
+    #     lag -= L
+
     X_aligned = np.roll(X, -lag)
     
     if return_ccf:
@@ -436,72 +448,72 @@ def assign_classes(observation, X_est):
     for k in range(X_est.shape[1]):
         # dist.append(np.linalg.norm(utils.align_to_ref(observation, X_est[:,k])[0]- X_est[:,k])**2)
         # dist.append(np.corrcoef(utils.align_to_ref(observation, X_est[:,k])[0], X_est[:,k])[0,1])
-        _, lag, corrcoef = align_to_ref(observation, X_est[:,k], True)
+        _, lag, corrcoef = align_to_ref(observation, X_est[:,k], return_ccf=True)
         dist.append(corrcoef[lag])
     return np.argmax(dist)
 
-def alignment_residual(x1, x2, return_lag = False):
-    """align the vector x1 after circularly shifting it such that it is optimally aligned with x2 in 2-norm. Calculate the 
+# def alignment_residual(x1, x2, return_lag = False):
+#     """align the vector x1 after circularly shifting it such that it is optimally aligned with x2 in 2-norm. Calculate the 
 
-    Args:
-        x1 (np array): 
-        x2 (np array): 
+#     Args:
+#         x1 (np array): 
+#         x2 (np array): 
 
-    Returns:
-        relative_residual (float): normalized residual between the aligned vector and x2.
-        lag (int): lag of best alignment
-    """
-    # align x1 to x2
-    x1_aligned, lag = align_to_ref(x1,x2)
-    relative_residual = np.linalg.norm(x1_aligned-x2)/np.linalg.norm(x1_aligned)/np.linalg.norm(x2)
+#     Returns:
+#         relative_residual (float): normalized residual between the aligned vector and x2.
+#         lag (int): lag of best alignment
+#     """
+#     # align x1 to x2
+#     x1_aligned, lag = align_to_ref(x1,x2)
+#     relative_residual = np.linalg.norm(x1_aligned-x2)/np.linalg.norm(x1_aligned)/np.linalg.norm(x2)
     
-    if return_lag:
-        return relative_residual, lag
-    else:
-        return relative_residual
+#     if return_lag:
+#         return relative_residual, lag
+#     else:
+#         return relative_residual
 
 
-def alignment_similarity(x1, x2, normalised = True, return_lag = False):
-    """return the highest cross correlation coefficient between two vectors up to a cyclic shift.
+# def alignment_similarity(x1, x2, normalised = True, return_lag = False):
+#     """return the highest cross correlation coefficient between two vectors up to a cyclic shift.
 
-    Args:
-        x1 (np array): 
-        x2 (np array):
+#     Args:
+#         x1 (np array): 
+#         x2 (np array):
 
-    Returns:
-        float: normalized correlation coefficient
-    """
-    _, lag, ccf = align_to_ref(x1, x2,return_ccf=True, normalised=normalised)
+#     Returns:
+#         float: normalized correlation coefficient
+#     """
+#     _, lag, ccf = align_to_ref(x1, x2,return_ccf=True, normalised=normalised)
     
-    if return_lag:
-        return np.max(ccf), lag
-    else: return np.max(ccf)
+#     if return_lag:
+#         return np.max(ccf), lag
+#     else: return np.max(ccf)
 
-def alignment_similarity_linear(x1, x2, normalised = True, return_lag = False):
-    """return the highest linear cross correlation coefficient between two vectors.
+# def alignment_similarity_linear(x1, x2, normalised = True, return_lag = False):
+#     """return the highest linear cross correlation coefficient between two vectors.
 
-    Args:
-        x1 (np array): 
-        x2 (np array):
+#     Args:
+#         x1 (np array): 
+#         x2 (np array):
 
-    Returns:
-        correlation: normalized correlation coefficient
-        lag: lag of signal 
-    """
-    x1 = x1.flatten()
-    x2 = x2.flatten()
+#     Returns:
+#         correlation: normalized correlation coefficient
+#         lag: lag of signal 
+#     """
+#     x1 = x1.flatten()
+#     x2 = x2.flatten()
     
-    if normalised:
-        m1 = np.mean(x1);s1 = np.std(x1)
-        m2 = np.mean(x2);s2 = np.std(x2)
-        x1 = (x1-m1)/s1
-        x2 = (x2-m2)/s2
-    ccf = signal.correlate(x1, x2, 'full')
+#     if normalised:
+#         m1 = np.mean(x1);s1 = np.std(x1)
+#         m2 = np.mean(x2);s2 = np.std(x2)
+#         x1 = (x1-m1)/s1
+#         x2 = (x2-m2)/s2
+#     ccf = signal.correlate(x1, x2, 'full')
     
-    if return_lag:
-        lag = len(x2) - np.argmax(ccf) - 1
-        return np.max(ccf), lag
-    else: return np.max(ccf)
+#     if return_lag:
+#         lag = len(x2) - np.argmax(ccf) - 1
+#         return np.max(ccf), lag
+#     else: return np.max(ccf)
 
 # for n in [8,10,12]:
 #     x = np.random.normal(0,1,n)
@@ -516,30 +528,30 @@ def alignment_similarity_linear(x1, x2, normalised = True, return_lag = False):
 #         assert lag == l, f'fn lag{lag}; true lag: {l}; n:{n}'
 
 
-def score_lag_mat(observations, score_fn = alignment_similarity_linear):
-    """produce the similarity or residual scores and best lags of a set of observations with a given score function
+# def score_lag_mat(observations, score_fn = alignment_similarity_linear):
+#     """produce the similarity or residual scores and best lags of a set of observations with a given score function
 
-    Args:
-        observations (LxN np array): vectors 
-        score_fn (python function, optional): score function which is used to compute the scores and lags between every pair of observations. Defaults to alignment_similarity_linear.
+#     Args:
+#         observations (LxN np array): vectors 
+#         score_fn (python function, optional): score function which is used to compute the scores and lags between every pair of observations. Defaults to alignment_similarity_linear.
 
-    Returns:
-        scores: (NxN np array) ij-th entry denotes the scores between observations i and j
-        lags: (NxN np array) ij-th entry denotes the best predicted lag between observations i and j
-    """
-    L, N = observations.shape
-    scores = np.zeros((N,N))
-    lags = np.zeros((N,N))
-    for j in range(N):
-        for i in range(j):
-            score, lag = score_fn(observations[:,i], observations[:,j], return_lag=True)
-            scores[i,j] = scores[j,i] = score
-            if lag >= L//2 + 1:
-                    lag -= L
-            lags[i,j] = lag
-            lags[j,i] = -lag
+#     Returns:
+#         scores: (NxN np array) ij-th entry denotes the scores between observations i and j
+#         lags: (NxN np array) ij-th entry denotes the best predicted lag between observations i and j
+#     """
+#     L, N = observations.shape
+#     scores = np.zeros((N,N))
+#     lags = np.zeros((N,N))
+#     for j in range(N):
+#         for i in range(j):
+#             score, lag = score_fn(observations[:,i], observations[:,j], return_lag=True)
+#             scores[i,j] = scores[j,i] = score
+#             if lag >= L//2 + 1:
+#                     lag -= L
+#             lags[i,j] = lag
+#             lags[j,i] = -lag
     
-    return scores, lags
+#     return scores, lags
 
 
 def save_to_folder(directory, folder_name):
@@ -547,7 +559,7 @@ def save_to_folder(directory, folder_name):
     # save such files in the \recorded_results folder
 
     now = dt.datetime.now()
-    date_string = now.strftime("%Y-%m-%d-%Hh%Mmin%Ss")  # use formatted datestring to name directory where results are saved
+    date_string = now.strftime("%Y-%m-%d-%Hh%Mmin")  # use formatted datestring to name directory where results are saved
 
     print('Recording results in directory: ' + directory, date_string + '_' + folder_name)
     str_write_dir = os.path.join(directory + '/', date_string + '_' + folder_name)

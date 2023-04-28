@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 import matplotlib.pyplot as plt
 import utils
@@ -8,7 +10,8 @@ from tqdm import tqdm
 import scipy.io as spio
 from scipy.linalg import block_diag
 from scipy.optimize import linear_sum_assignment
-    
+from scipy import signal
+
     
 def get_signal(type, L):
     if type == 'logreturns':
@@ -59,47 +62,284 @@ def lag_mat_het(lags, classes, return_block_mat = False):
     else:
         return lag_mat_list
 
-def get_lag_matrix(observations, ref = None, max_shift = 1):
-    """calculate the best lags estimates of a given set of observations, with or without a latent reference signal
+
+def alignment_residual(x1, x2, max_lag = None, return_lag = False):
+    """align the vector x1 after circularly shifting it such that it is optimally aligned with x2 in 2-norm. Calculate the 
+
+    Args:
+        x1 (np array): 
+        x2 (np array): 
+
+    Returns:
+        relative_residual (float): normalized residual between the aligned vector and x2.
+        lag (int): lag of best alignment
+    """
+    # align x1 to x2
+    x1_aligned, lag = utils.align_to_ref(x1,x2, max_lag = None)
+    relative_residual = np.linalg.norm(x1_aligned-x2)/np.linalg.norm(x1_aligned)/np.linalg.norm(x2)
+    
+    if return_lag:
+        return relative_residual, lag
+    else:
+        return relative_residual
+
+
+def alignment_similarity(x1, x2, max_lag = None, normalised = True, return_lag = False):
+    """return the highest cross correlation coefficient between two vectors up to a cyclic shift.
+
+    Args:
+        x1 (np array): 
+        x2 (np array):
+
+    Returns:
+        float: normalized correlation coefficient
+    """
+    _, lag, ccf = utils.align_to_ref(x1, x2, max_lag, return_ccf=True, normalised=normalised)
+    
+    if return_lag:
+        return ccf[lag], lag
+    else: return ccf[lag]
+
+def alignment_similarity_linear(x1, x2, max_lag = None, normalised = True, return_lag = False):
+    """return the highest linear cross correlation coefficient between two vectors.
+
+    Args:
+        x1 (np array): 
+        x2 (np array):
+
+    Returns:
+        correlation: normalized correlation coefficient
+        lag: lag of signal 
+    """
+    x1 = x1.flatten()
+    x2 = x2.flatten()
+    
+    if normalised:
+        m1 = np.mean(x1);s1 = np.std(x1)
+        m2 = np.mean(x2);s2 = np.std(x2)
+        x1 = (x1-m1)/s1
+        x2 = (x2-m2)/s2
+    ccf = signal.correlate(x1, x2, 'full')
+    
+    L = len(x1)
+    # set default value of max lag to be the maximum possible lag
+    if max_lag is None:
+        max_lag = L-1
+        
+    if return_lag:
+        # lag = len(x2) - (np.argmax(ccf[L-max_lag-1:L+max_lag])+ L-max_lag-1) - 1
+        lag = max_lag - np.argmax(ccf[L-max_lag-1:L+max_lag])
+        return np.max(ccf[L-max_lag-1:L+max_lag]), lag
+    else: return np.max(ccf[L-max_lag-1:L+max_lag])
+
+# for n in [8,10,12]:
+#     x = np.random.normal(0,1,n)
+#     for l in [-3,-2,-1,1,2,3]:
+#         y = np.roll(x, l)
+#         if l > 0:
+#             y[0:l] = np.zeros(abs(l))
+#         else:
+#             y[len(y)+l:len(y)] = np.zeros(abs(l))
+        
+#         corr, lag = alignment_similarity_linear(x,y, return_lag=True)
+#         assert lag == l, f'fn lag{lag}; true lag: {l}; n:{n}'
+
+
+def score_lag_mat(observations, max_lag = None, score_fn = alignment_similarity_linear):
+    """produce the similarity or residual scores and best lags of a set of observations with a given score function
+
+    Args:
+        observations (LxN np array): vectors 
+        score_fn (python function, optional): score function which is used to compute the scores and lags between every pair of observations. Defaults to alignment_similarity_linear.
+
+    Returns:
+        scores: (NxN np array) ij-th entry denotes the scores between observations i and j
+        lags: (NxN np array) ij-th entry denotes the best predicted lag between observations i and j
+    """
+    L, N = observations.shape
+    scores = np.zeros((N,N))
+    lags = np.zeros((N,N))
+    for j in range(N):
+        for i in range(j):
+            score, lag = score_fn(observations[:,i], observations[:,j], max_lag=max_lag, return_lag=True)
+            scores[i,j] = scores[j,i] = score
+            if lag >= L//2 + 1:
+                    lag -= L
+            lags[i,j] = lag
+            lags[j,i] = -lag
+    
+    return scores, lags
+
+def circ_rolling_sum(vec, win_width):
+    """
+
+    Args:
+        vec: 1-dim np array of length n
+        win_width: width of rolling window
+
+    Returns:
+        1-dim np array of length n
+        rolling sum of a window of win-width over vec. When the rolling window hits the tail of the vector, continue to slide as if the head of the vector connect to the tail.
+
+    """
+    vec = vec.flatten()
+    assert win_width > 0
+    assert win_width <= len(vec)
+
+    vec = np.append(vec, vec[:win_width-1])
+    cumsum = np.cumsum(vec)
+    cumsum[win_width:] = cumsum[win_width:] - cumsum[:-win_width]
+
+    return cumsum[win_width-1:]
+
+def argmax_last(x):
+    """
+
+    Args:
+        x: 2-dim np array
+
+    Returns: the index of the last occurence of the maximum value in an array
+
+    """
+
+    x_rev = x[::-1]
+    i = len(x_rev) - np.argmax(x_rev) - 1
+    return i
+def lag_to_ref(X, X_ref, normalised = True, start = 0, lag_range = None):
+    """
+
+    Args:
+        X: LxN array
+        ref: 1-dim array of length L
+        normalised:
+
+    Returns:
+
+    """
+    X_ref = X_ref.flatten()
+    if X.ndim == 1:
+        X.resahpe(-1,1)
+    assert len(X_ref) == len(X), 'Lengths of data and reference are not equal'
+    if not lag_range:
+        lag_range = len(X_ref)
+    assert lag_range <= len(X_ref)
+    if normalised:
+        m1 = np.mean(X, axis = 0); s1 = np.std(X, axis = 0)
+        m2 = np.mean(X_ref); s2 = np.std(X_ref)
+        X = (X - m1) / s1
+        X_ref = (X_ref - m2) / s2
+
+    X_ref_fft = np.fft.fft(X_ref)
+    X_fft = np.fft.fft(X, axis = 0)
+    ccf = np.fft.ifft(np.tile(X_ref_fft.conj().reshape(-1, 1), (1, X_fft.shape[1])) \
+                      * X_fft, axis=0).real
+    ccf = np.roll(ccf, shift = -start, axis = 0)
+    lags = np.argmax(ccf[:lag_range], axis=0) + start
+
+    return lags % len(X_ref)
+
+def get_lag_matrix_ref(observations, ref, max_lag = None):
+    """Calculate the best lags estimates of a given set of observations with a latent reference signal. 
 
     Args:
         observations (np array): L x N matrix with columns consist of time series
-        ref (np array, optional): 1-dim length L reference time series signal. Defaults to None.
+        ref (np array): 1-dim length L reference time series signal.
+        max_lag: maximum lag wrt to the ref signal
     """
+    # initilizations
     L, N = observations.shape
+    ref = ref.flatten()
+    assert len(ref) == L
+
+
+
+    # Calculate unconstrained lags for all observations
+    shifts_est = lag_to_ref(observations, ref)
+    assert np.min(shifts_est) >= 0
+    assert np.max(shifts_est) < L
+    # find window of lags with the highest frequency
+    if max_lag:
+        lag_freq = np.bincount(shifts_est, minlength=L)
+        # min_win_width = np.nonzero(vec)[-1] - np.nonzero(vec)[0] + 1
+        lag_start = np.argmax(circ_rolling_sum(lag_freq, max_lag+1)) # window width should be max lag + 1
+        recalculate = (shifts_est - lag_start) % L > max_lag
+        if np.count_nonzero(recalculate) > 0:
+            shifts_est[recalculate] = lag_to_ref(observations[:, recalculate],\
+                                                 ref,\
+                                                 start=lag_start,\
+                                                 lag_range= max_lag)
+        shifts_est = (shifts_est - lag_start) % L
+    # ref_aligned = np.roll(ref, shift = window_start)
+    # if window_end > window_start:
+    #     accept_arr = (shifts_est >= window_start) * (shifts_est < window_end)
+    # else:
+    #     accept_arr = (shifts_est >= window_start) + (shifts_est < window_end)
+
+    # ref_lag = round(np.mean(shifts_est))
+    # ref_aligned = np.roll(ref, shift=ref_lag)
+    # shifts_est -= ref_lag
+    # limit the range of lag predictions
+
+    # recalculate the lags outside predicted range
+    # for i in range(N):
+    #     if shifts_est > max_lag or shifts_est < 0:
+    #         lag = utils.align_to_ref(observations[:,i], ref_aligned, max_lag = max_lag)[1]
+    #         # ccf = utils.align_to_ref(observations[:,i], ref, return_ccf=True)[2]
+    #         # lag = np.argmax(ccf[int(shifts_est[i]])
+    #         shifts_est[i] = lag
+    lag_mat = lag_vec_to_mat(shifts_est)
+    lag_mat[abs(lag_mat) >= (L+1)//2] -= np.sign(lag_mat[abs(lag_mat) >= (L+1)//2]) * L
+    if max_lag:
+        assert (abs(lag_mat) <= max_lag).all()
+    return lag_mat, shifts_est
+#
+# N = 10
+# x = np.arange(20)
+# l=3
+# shifts = random.choices(range(10,10+5), k=N)
+# X = np.array([list(np.roll(x, shift=shifts[i]) for i in range(N))])[0].T
+# lags, lags_mat = get_lag_matrix_ref(X,x,max_lag=3)
+# shifts_mat = lag_vec_to_mat(np.array(shifts))
+# assert (lags == lag_vec_to_mat(np.array(shifts))).all()
+# print('done')
+
+# def get_lag_matrix(observations, ref = None, max_lag = None):
+#     """calculate the best lags estimates of a given set of observations, with or without a latent reference signal
+
+#     Args:
+#         observations (np array): L x N matrix with columns consist of time series
+#         ref (np array, optional): 1-dim length L reference time series signal. Defaults to None.
+#     """
+#     L, N = observations.shape
     
-    if ref is not None:
-        assert len(ref == L)
-        shifts_est = np.zeros(N)
-        for i in range(N):
-            _, lag = utils.align_to_ref(observations[:,i], ref)
-            shifts_est[i] = lag
-        # limit the range of lag predictions
-        # shifts_est_centred = shifts_est - np.mean(shifts_est)
-        # for i in range(N):
-        #     if abs(shifts_est_centred[i]) >= max_shift * L:
-        #         ccf = utils.align_to_ref(observations[:,i], ref, return_ccf=True)[2]    
-        #         lag = np.argmax(ccf[int(shifts_est[i]])
-        lag_mat = lag_vec_to_mat(shifts_est)
-        for i in range(N):
-            for j in range(N):
-                if abs(lag_mat[i,j]) >= L//2 + 1:
-                    lag_mat[i,j] -= np.sign(lag_mat[i,j]) * L
-    else:
-        lag_mat = np.zeros((N,N))
-        for j in range(N):
-            for i in range(j):
-                # lag = np.argmax((np.correlate(observations[:,i], observations[:,j], 'full'))[L-1:])
-                # if lag >= L//2 + 1:
-                #     lag -= L
-                # norm_factor = np.array(list(range(L))+list(range(L,0,-1)))
-                # lag = np.argmax((np.correlate(observations[:,i], observations[:,j], 'full'))/norm_factor)
-                _, lag = utils.align_to_ref(observations[:,i], observations[:,j])
-                if lag >= L//2 + 1:
-                    lag -= L
-                lag_mat[i,j] = lag
-                lag_mat[j,i] = -lag
-    return lag_mat  
+#     if ref is not None:
+#         assert len(ref == L)
+#         shifts_est = np.zeros(N)
+#         for i in range(N):
+#             _, lag = utils.align_to_ref(observations[:,i], ref, max_lag)
+#             shifts_est[i] = lag
+#         # limit the range of lag predictions
+#         # shifts_est_centred = shifts_est - np.mean(shifts_est)
+#         # for i in range(N):
+#         #     if abs(shifts_est_centred[i]) >= max_shift * L:
+#         #         ccf = utils.align_to_ref(observations[:,i], ref, return_ccf=True)[2]    
+#         #         lag = np.argmax(ccf[int(shifts_est[i]])
+#         lag_mat = lag_vec_to_mat(shifts_est)
+#         # for i in range(N):
+#         #     for j in range(N):
+#         #         if abs(lag_mat[i,j]) >= L//2 + 1:
+#         #             lag_mat[i,j] -= np.sign(lag_mat[i,j]) * L
+#     else:
+#         lag_mat = np.zeros((N,N))
+#         for j in range(N):
+#             for i in range(j):
+#                 _, lag = utils.align_to_ref(observations[:,i], observations[:,j])
+#                 if lag >= L//2 + 1:
+#                     lag -= L
+#                 lag_mat[i,j] = lag
+#                 lag_mat[j,i] = -lag
+#     return lag_mat  
+
 
 def get_lag_mat_het(observations, ref = None, classes = None):
     lag_mat_list = []
@@ -218,6 +458,7 @@ def eval_lag_mat_het(lag_mat, lag_mat_true, classes, classes_true, penalty=0):
     lag_mat_true = lag_mat_post_clustering(lag_mat_true, classes_true)
     n = 0 # number of lags evaluated
     n_total = np.count_nonzero(~np.isnan(lag_mat_true))//2
+    
     for c in np.unique(classes):
         # calculate true lags
         # sub_lag_mat_true = lag_mat_true[classes == c][:,classes == c]
@@ -250,41 +491,41 @@ def eval_lag_mat_het(lag_mat, lag_mat_true, classes, classes_true, penalty=0):
     
     return rel_error, rel_error_sign, accuracy, errors_list
 
-def eval_alignment(observations, shifts, sigma, X_est = None):
-    """compare the performance of lead-lag predition using intermidiate latent signal to naive pairwise prediciton
+# def eval_alignment(observations, shifts, sigma, X_est = None):
+#     """compare the performance of lead-lag predition using intermidiate latent signal to naive pairwise prediciton
 
-    Args:
-        observations (np array): L x N matrix with columns consist of time series
-        shifts (np array): 1-dim array that contains the ground true lags of the observations to some unknown signal
+#     Args:
+#         observations (np array): L x N matrix with columns consist of time series
+#         shifts (np array): 1-dim array that contains the ground true lags of the observations to some unknown signal
 
-    Returns:
-        mean_error: error of prediction
-        accuracy: accuracy of prediction
-        mean_error_0: error of naive approach
-        accuracy_0: accuracy of naive approach
+#     Returns:
+#         mean_error: error of prediction
+#         accuracy: accuracy of prediction
+#         mean_error_0: error of naive approach
+#         accuracy_0: accuracy of naive approach
 
-    """
-    L, N = observations.shape
-    lag_mat_true = lag_vec_to_mat(shifts)
+#     """
+#     L, N = observations.shape
+#     lag_mat_true = lag_vec_to_mat(shifts)
     
-    if X_est is None:
-        # estimate and align to signal
-        X_est = optimization.optimise_manopt(observations, sigma)
+#     if X_est is None:
+#         # estimate and align to signal
+#         X_est = optimization.optimise_manopt(observations, sigma)
     
-    # calculate lags of observation to the aligned estimate
-    lag_mat = get_lag_matrix(observations, X_est)
-    lag_mat_0 = get_lag_matrix(observations)
+#     # calculate lags of observation to the aligned estimate
+#     lag_mat = get_lag_matrix(observations, X_est)
+#     lag_mat_0 = get_lag_matrix(observations)
     
-    # evaluate error and accuracy
-    norm = np.linalg.norm(lag_mat_true,1)
-    rel_error, accuracy = eval_lag_mat(lag_mat, lag_mat_true)
-    rel_error_0, accuracy_0 = eval_lag_mat(lag_mat_0, lag_mat_true)
+#     # evaluate error and accuracy
+#     norm = np.linalg.norm(lag_mat_true,1)
+#     rel_error, accuracy = eval_lag_mat(lag_mat, lag_mat_true)
+#     rel_error_0, accuracy_0 = eval_lag_mat(lag_mat_0, lag_mat_true)
     
-    return rel_error, accuracy, rel_error_0, accuracy_0, X_est
+#     return rel_error, accuracy, rel_error_0, accuracy_0, X_est
 
 
 
-def eval_alignment_het(observations, lag_mat_true, classes = None, classes_true = None,  X_est = None, sigma = None, penalty = 0):
+def eval_alignment_het(observations, lag_mat_true, classes = None, classes_true = None,  X_est = None, sigma = None, penalty = 0, max_lag = None):
     """compare the performance of lead-lag predition using intermidiate latent signal to naive pairwise prediciton
 
     Args:
@@ -301,7 +542,7 @@ def eval_alignment_het(observations, lag_mat_true, classes = None, classes_true 
     # initialization
     rel_error = rel_error_sign = accuracy = 0
     errors_list = []
-    
+        
     # assign observations to the closest cluster centre
     if classes is None:
         assert X_est != None, 'Cannot assign classes without cluster signals'
@@ -335,7 +576,7 @@ def eval_alignment_het(observations, lag_mat_true, classes = None, classes_true 
         sub_lag_mat_true_eval_test = sub_lag_mat_true[sub_classes_true == c][:,sub_classes_true == c]
         assert (np.triu(sub_lag_mat_true_eval,1) == np.triu(sub_lag_mat_true_eval_test,1)).all()
         # subset lags to evaluate
-        sub_lag_mat = get_lag_matrix(sub_observations, sub_X_est)
+        sub_lag_mat = get_lag_matrix_ref(sub_observations, sub_X_est, max_lag=max_lag)[0]
         np.fill_diagonal(sub_lag_mat, np.nan)
         sub_lag_mat_eval = sub_lag_mat[sub_classes_true == c][:,sub_classes_true == c]
         
@@ -357,7 +598,7 @@ def eval_alignment_het(observations, lag_mat_true, classes = None, classes_true 
     else:
         rel_error /= n 
     assert abs(np.mean(errors_list) - rel_error) < 1e-6, f'difference in error = {abs(np.mean(errors_list) - rel_error):.3g}'
-    
+    # print(f'class {c}, ref lags {ref_lags}')
     if X_est is None:
         X_est = np.concatenate(X_est_list,axis=1)
         return rel_error, rel_error_sign, accuracy, errors_list, X_est
@@ -492,13 +733,15 @@ def get_synchronized_signals(observations, classes, lag_matrix, max_lag = None):
     for c in np.unique(classes):
         # copmpute the synchronized lags
         sub_lag_matrix = lag_matrix[classes == c][:,classes == c]
-        start = time.time()
-        pi, r, _ = SVD_NRS(sub_lag_matrix)
-        r_rounded = np.array(np.round(r), dtype=int)
-        # r_rounded -= min(r_rounded) # make the relative lags start from zero
-        # compute the cluster average X
-        sub_observations = observations.T[classes == c][abs(r_rounded) <= max_lag].T
-        X_est[:,c] = synchronize(sub_observations, r_rounded[abs(r_rounded) <= max_lag])
+        if (sub_lag_matrix==0).all():
+            X_est[:,c] = np.mean(observations[:,classes == c],axis = 1)
+        else:
+            pi, r, _ = SVD_NRS(sub_lag_matrix)
+            r_rounded = np.array(np.round(r), dtype=int)
+            # r_rounded -= min(r_rounded) # make the relative lags start from zero
+            # compute the cluster average X
+            sub_observations = observations.T[classes == c][abs(r_rounded) <= max_lag].T
+            X_est[:,c] = synchronize(sub_observations, r_rounded[abs(r_rounded) <= max_lag])
 
     return X_est
 

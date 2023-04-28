@@ -10,13 +10,13 @@ dname = os.path.dirname(abspath)
 os.chdir(dname)
 
 ###--- change folder name accroding to experiment specications ---###
-folder_name = 'logreturns_lag_error_penalty0'
+folder_name = 'logreturns_penalty0_maxlag_10'
 
 #----- Check these parameters are in sync with main.py -----#
 test = False
 
 if test:
-    sigma_range = np.arange(0.1,2.1,1) # std of random gaussian noise
+    sigma_range = np.arange(0.1,2.0,0.2) # std of random gaussian noise
     K_range = [2]
 else:
     sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise

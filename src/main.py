@@ -14,17 +14,19 @@ import scipy.io as spio
 import utils
 import alignment
 
-test = False
+test = True
 # ======= initialisation ===========
 # intialise parameters
 if test:
-    sigma_range = np.arange(1.5,2.1,0.2) # std of random gaussian noise
+    sigma_range = np.arange(1.4,2.0,0.1) # std of random gaussian noise
     K_range = [2]
+    n = 500
 else:
     sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise
     K_range = [2,3,4]
-# n = 200 # number of observations we evaluate
+    n = 500 # number of observations we evaluate
 max_shift= 0.1 # max proportion of lateral shift
+assumed_max_lag = 10
 # data path
 data_path = '../../data/data500_logreturns_init3/'
 
@@ -83,9 +85,9 @@ for k in tqdm(K_range):
                                       'class'+str(k)+'.mat'])
         observations_mat = spio.loadmat(observations_path)
         results_mat = spio.loadmat(results_path)
-        observations = observations_mat['data']
-        shifts = observations_mat['shifts'].flatten()
-        classes_true = observations_mat['classes'].flatten() - 1
+        observations = observations_mat['data'][:,:n]
+        shifts = observations_mat['shifts'].flatten()[:n]
+        classes_true = observations_mat['classes'].flatten()[:n] - 1
         X_est = results_mat['x_est']
         P_est = results_mat['p_est'].flatten()
         X_true = results_mat['x_true']
@@ -97,7 +99,7 @@ for k in tqdm(K_range):
         #--------- Clustering ----------#
         
         # baseline clustering method, obtain lag matrix from pairwise CCF
-        affinity_matrix, lag_matrix = utils.score_lag_mat(observations,score_fn=utils.alignment_similarity)
+        affinity_matrix, lag_matrix = alignment.score_lag_mat(observations, max_lag = assumed_max_lag, score_fn=alignment.alignment_similarity)
         SPC = SpectralClustering(n_clusters=k,
                                 affinity = 'precomputed',
                                 random_state=0).fit(affinity_matrix)
@@ -138,11 +140,11 @@ for k in tqdm(K_range):
  
         # SPC + synchronization
         X_est_sync = alignment.get_synchronized_signals(observations, classes_spc, lag_matrix)
-        
         results_sync = \
             alignment.eval_alignment_het(observations, lag_mat_true, \
                                          classes_spc, classes_true, \
-                                        X_est_sync, penalty=error_penalty)
+                                        X_est_sync, penalty=error_penalty, \
+                                        max_lag = assumed_max_lag)
         
         # error_list_sync.append(rel_error_sync)
         # acc_list_sync.append(accuracy_sync)
@@ -152,7 +154,8 @@ for k in tqdm(K_range):
         results_spc = \
             alignment.eval_alignment_het(observations, lag_mat_true, \
                                         classes_spc, classes_true,\
-                                        sigma = sigma, penalty=error_penalty)
+                                        sigma = sigma, penalty=error_penalty, \
+                                        max_lag = assumed_max_lag)
         X_est_spc = results_spc[-1] 
         results_spc = results_spc[:-1] 
         # error_list_spc.append(rel_error_spc)
@@ -163,7 +166,8 @@ for k in tqdm(K_range):
         results_het = \
             alignment.eval_alignment_het(observations, lag_mat_true, \
                                         classes_est, classes_true, \
-                                        X_est, penalty=error_penalty)
+                                        X_est, penalty=error_penalty, \
+                                        max_lag = assumed_max_lag)
         
         # error_list_het.append(rel_error_het)
         # acc_list_het.append(accuracy_het)
