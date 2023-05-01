@@ -14,7 +14,7 @@ import scipy.io as spio
 import utils
 import alignment
 
-test = True
+test = False
 # ======= initialisation ===========
 # intialise parameters
 if test:
@@ -46,28 +46,6 @@ for k in tqdm(K_range):
                                           'het': []}}
     for metric in metrics:
         performance[f'K={k}'][metric] = {label:[] for label in labels}
-    # ARI_list = []
-    # ARI_list_spc = []
-    
-    # error_list_pair = []
-    # acc_list_pair = []
-    # Errors_pair = []
-    
-    # error_list_sync = []
-    # acc_list_sync = []
-    # Errors_sync = []
-    
-    # error_list_spc = []
-    # acc_list_spc = []
-    # Errors_spc = []
-    
-    # error_list_het = []
-    # acc_list_het = []
-    # Errors_het = []
-    
-    # signal_estimates[f'K={k}'] = {}
-    # classes_estimates[f'K={k}'] = {}
-    # p_estimates[f'K={k}'] = {}
     
     estimates[f'K={k}'] = {}
     
@@ -125,19 +103,12 @@ for k in tqdm(K_range):
         lag_mat_true = alignment.lag_vec_to_mat(shifts)
         # error_penalty = int(observations.shape[0]/2)
         error_penalty = 0
-        
+
         # SPC + pairwaise correlation-based lags
-        # rel_error_pair, rel_error_sign_pair, accuracy_pair, errors_pair = alignment.eval_lag_mat_het(lag_matrix, lag_mat_true,classes_spc, classes_true, error_penalty)
         results_pair = alignment.eval_lag_mat_het(lag_matrix, lag_mat_true, \
                                                 classes_spc, classes_true,\
                                                 error_penalty)
-        # rel_error_pair_0, accuracy_pair_0 = alignment.eval_lag_mat_het(lag_matrix, lag_mat_true,classes_spc_aligned, classes_true)
-        # print(rel_error_pair_0-rel_error_pair)
-        # print(accuracy_pair_0-accuracy_pair)
-    
-        # acc_list_pair.append(accuracy_pair)
-        # Errors_pair.append(errors_pair)
- 
+
         # SPC + synchronization
         X_est_sync = alignment.get_synchronized_signals(observations, classes_spc, lag_matrix)
         results_sync = \
@@ -145,11 +116,7 @@ for k in tqdm(K_range):
                                          classes_spc, classes_true, \
                                         X_est_sync, penalty=error_penalty, \
                                         max_lag = assumed_max_lag)
-        
-        # error_list_sync.append(rel_error_sync)
-        # acc_list_sync.append(accuracy_sync)
-        # Errors_sync.append(errors_sync)
-        
+
         # SPC + homogeneous optimization
         results_spc = \
             alignment.eval_alignment_het(observations, lag_mat_true, \
@@ -157,21 +124,15 @@ for k in tqdm(K_range):
                                         sigma = sigma, penalty=error_penalty, \
                                         max_lag = assumed_max_lag)
         X_est_spc = results_spc[-1] 
-        results_spc = results_spc[:-1] 
-        # error_list_spc.append(rel_error_spc)
-        # acc_list_spc.append(accuracy_spc)
-        # Errors_spc.append(errors_spc)
-        
+        results_spc = results_spc[:-1]
+
         # heterogeneous optimization
         results_het = \
             alignment.eval_alignment_het(observations, lag_mat_true, \
                                         classes_est, classes_true, \
                                         X_est, penalty=error_penalty, \
                                         max_lag = assumed_max_lag)
-        
-        # error_list_het.append(rel_error_het)
-        # acc_list_het.append(accuracy_het)
-        # Errors_het.append(errors_het)
+
         results_list = [results_pair,results_sync,results_spc,results_het]
         
         for i in range(len(metrics)):
@@ -210,42 +171,8 @@ for k in tqdm(K_range):
                             'het': P_est
                              }
         }
-        
-        # signal_estimates[f'K={k}'][f'sigma={sigma:.2g}'] = \
-        #                             {'true': X_true,
-        #                             'sync': X_est_sync,
-        #                             'spc': X_est_spc,
-        #                             'het':X_est
-        #                             }    
-        
-        # classes_estimates[f'K={k}'][f'sigma={sigma:.2g}'] = \
-        #                             {'spc': classes_spc,
-        #                             'het': classes_est,
-        #                             'true': classes_true}
 
-        # if sigma % 0.5 < 1:
-        #     # plot the difference of estimated signals
 
-        #     X_spc_aligned, perm = utils.align_to_ref_het(X_est_spc, X_true)
-        #     fig, ax = plt.subplots(k, 1, figsize = (10,5*k))
-        #     for i in range(k):
-        #         rel_err_hetero = np.linalg.norm(X_est[:,i]-X_true[:,i])/np.linalg.norm(X_true)
-        #         rel_err_spc = np.linalg.norm(X_spc_aligned[:,i]-X_true[:,i])/np.linalg.norm(X_true)
-        #         p_true = np.sum(classes_true==i)/observations.shape[1]
-        #         ax[i].plot(X_true[:,i], label = 'true')
-        #         ax[i].plot(X_est[:,i], label = 'hetero', linestyle = '--')
-        #         ax[i].plot(X_spc_aligned[:,i], label = 'spc', linestyle = ':')
-        #         ax[i].set_title(f'rel. err.:  hetero {rel_err_hetero:.2f}; '\
-        #                         f'spc {rel_err_spc:.2f}; '\
-        #                         f'true p: {p_true:.2f}, '\
-        #                         f'est. p: {P_est[i]:.2f}')
-        #         ax[i].grid()
-        #         ax[i].legend()
-            
-        #     fig.suptitle(f'Comparison of the True and Estimated Signals, K = {k}, noise = {sigma:.2g}')
-        #     plt.savefig(results_save_dir + f'/signals_K={k}_{j}')
-        #     j += 1
-    
     # store results
     # performance[f'K={k}'] = {
     #                     'ARI'     : {'spc': ARI_list_spc,
@@ -271,6 +198,8 @@ with open('../results/performance.pkl', 'wb') as f:
 with open('../results/estimates.pkl', 'wb') as f:   
     pickle.dump(estimates, f)
 
+if __name__ == "__main__":
+    main()
 # with open('../results/clustering.pkl', 'rb') as f:   
 #         result = pickle.load(f)
     

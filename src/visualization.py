@@ -16,7 +16,7 @@ folder_name = 'logreturns_penalty0_maxlag_10'
 test = False
 
 if test:
-    sigma_range = np.arange(0.1,2.0,0.2) # std of random gaussian noise
+    sigma_range = np.arange(1.4, 2.0, 0.1)  # std of random gaussian noise
     K_range = [2]
 else:
     sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise

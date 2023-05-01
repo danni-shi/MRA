@@ -220,9 +220,12 @@ def lag_to_ref(X, X_ref, normalised = True, start = 0, lag_range = None):
     if X.ndim == 1:
         X.resahpe(-1,1)
     assert len(X_ref) == len(X), 'Lengths of data and reference are not equal'
+
+    # set default value for the assumed range of lags
     if not lag_range:
         lag_range = len(X_ref)
     assert lag_range <= len(X_ref)
+
     if normalised:
         m1 = np.mean(X, axis = 0); s1 = np.std(X, axis = 0)
         m2 = np.mean(X_ref); s2 = np.std(X_ref)
@@ -238,6 +241,33 @@ def lag_to_ref(X, X_ref, normalised = True, start = 0, lag_range = None):
 
     return lags % len(X_ref)
 
+# functions to check if the estimated lags are more wide-spread than the assumed maximum lag
+def consecutive_zeros(array):
+    result = 0
+    streak = 0
+    for ele in array:
+        if ele == 0:
+            streak += 1
+        else:
+            streak = 0
+        result = max(result, streak)
+    return result
+def smallest_lag_range(lag_counts):
+    """
+    find the shortest length of subarray that does not start or end with zero in a cyclic fashion.
+    Args:
+        lag_counts: counts of lags. ith element is the count of lags that equals i
+
+    Returns: int
+
+    """
+    if lag_counts.ndim > 1:
+        lag_counts = lag_counts.flatten()
+    extended_counts = np.append(lag_counts,lag_counts)
+    max_consecutive_zeros = consecutive_zeros(extended_counts)
+
+    return len(lag_counts) - max_consecutive_zeros
+
 def get_lag_matrix_ref(observations, ref, max_lag = None):
     """Calculate the best lags estimates of a given set of observations with a latent reference signal. 
 
@@ -251,16 +281,13 @@ def get_lag_matrix_ref(observations, ref, max_lag = None):
     ref = ref.flatten()
     assert len(ref) == L
 
-
-
     # Calculate unconstrained lags for all observations
     shifts_est = lag_to_ref(observations, ref)
     assert np.min(shifts_est) >= 0
     assert np.max(shifts_est) < L
     # find window of lags with the highest frequency
-    if max_lag:
-        lag_freq = np.bincount(shifts_est, minlength=L)
-        # min_win_width = np.nonzero(vec)[-1] - np.nonzero(vec)[0] + 1
+    lag_freq = np.bincount(shifts_est, minlength=L)
+    if max_lag < smallest_lag_range(shifts_est) - 1:
         lag_start = np.argmax(circ_rolling_sum(lag_freq, max_lag+1)) # window width should be max lag + 1
         recalculate = (shifts_est - lag_start) % L > max_lag
         if np.count_nonzero(recalculate) > 0:
