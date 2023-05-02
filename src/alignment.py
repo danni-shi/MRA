@@ -287,7 +287,7 @@ def get_lag_matrix_ref(observations, ref, max_lag = None):
     assert np.max(shifts_est) < L
     # find window of lags with the highest frequency
     lag_freq = np.bincount(shifts_est, minlength=L)
-    if max_lag < smallest_lag_range(shifts_est) - 1:
+    if max_lag < smallest_lag_range(lag_freq) - 1:
         lag_start = np.argmax(circ_rolling_sum(lag_freq, max_lag+1)) # window width should be max lag + 1
         recalculate = (shifts_est - lag_start) % L > max_lag
         if np.count_nonzero(recalculate) > 0:

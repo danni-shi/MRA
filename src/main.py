@@ -198,8 +198,6 @@ with open('../results/performance.pkl', 'wb') as f:
 with open('../results/estimates.pkl', 'wb') as f:   
     pickle.dump(estimates, f)
 
-if __name__ == "__main__":
-    main()
 # with open('../results/clustering.pkl', 'rb') as f:   
 #         result = pickle.load(f)
     
