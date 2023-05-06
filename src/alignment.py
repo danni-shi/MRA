@@ -515,8 +515,9 @@ def eval_lag_mat_het(lag_mat, lag_mat_true, classes, classes_true, penalty=0):
         rel_error /= n 
     
     assert abs(np.mean(errors_list) - rel_error) < 1e-6, f'difference in error = {abs(np.mean(errors_list) - rel_error):.3g}'
-    
-    return rel_error, rel_error_sign, accuracy, errors_list
+    # store only the errors percentiles
+    error_percentiles = np.percentile(errors_list, [range(0,101,5)]).flatten()
+    return rel_error, rel_error_sign, accuracy, error_percentiles
 
 # def eval_alignment(observations, shifts, sigma, X_est = None):
 #     """compare the performance of lead-lag predition using intermidiate latent signal to naive pairwise prediciton
@@ -625,12 +626,14 @@ def eval_alignment_het(observations, lag_mat_true, classes = None, classes_true 
     else:
         rel_error /= n 
     assert abs(np.mean(errors_list) - rel_error) < 1e-6, f'difference in error = {abs(np.mean(errors_list) - rel_error):.3g}'
-    # print(f'class {c}, ref lags {ref_lags}')
+    # store only the errors percentiles
+    error_percentiles = np.percentile(errors_list, [range(0,101,5)]).flatten()
+
     if X_est is None:
         X_est = np.concatenate(X_est_list,axis=1)
-        return rel_error, rel_error_sign, accuracy, errors_list, X_est
+        return rel_error, rel_error_sign, accuracy, error_percentiles, X_est
     else:
-        return  rel_error, rel_error_sign, accuracy, errors_list
+        return  rel_error, rel_error_sign, accuracy, error_percentiles
 
 #---- Implementation of SVD-Synchronization ----#
 def reconcile_score_signs(H,r, G=None):

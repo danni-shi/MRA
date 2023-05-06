@@ -165,7 +165,7 @@ def align_all_signals(X_est_sync, X_est_spc, X_true, classes_spc, classes_est, c
 
 
 def initialise_containers(K_range, models):
-    metrics = ['error', 'error_sign', 'accuracy', 'errors_list']
+    metrics = ['error', 'error_sign', 'accuracy', 'errors_quantile']
 
     performance = {}
     estimates = {}
@@ -203,7 +203,7 @@ def run(sigma_range=np.arange(0.1, 2.1, 0.1),
     if test:
         sigma_range = np.arange(0.1, 2.0, 0.5)
         K_range = [2]
-    metrics = ['error', 'error_sign', 'accuracy', 'errors_list']
+    metrics = ['error', 'error_sign', 'accuracy', 'errors_quantile']
 
     # initialise containers
     performance = {}
@@ -220,7 +220,7 @@ def run(sigma_range=np.arange(0.1, 2.1, 0.1),
 
             # read data produced from matlab code base
             observations, shifts, classes_true, X_est, P_est, X_true = read_data(
-                data_path=data_path[:-1] + '_' + str(round) + '/',
+                data_path=data_path+str(round)+'/',
                 sigma=sigma,
                 max_shift=max_shift,
                 k=k,
@@ -276,16 +276,16 @@ def run(sigma_range=np.arange(0.1, 2.1, 0.1),
                     performance[f'K={k}'][metric][model].append(metric_result)
 
     # save the results to folder
-    with open(f'../results/performance{round}.pkl', 'wb') as f:
+    with open(f'../results/performance/{round}.pkl', 'wb') as f:
         pickle.dump(performance, f)
 
     if return_signals:
-        with open(f'../results/estimates{round}.pkl', 'wb') as f:
+        with open(f'../results/signal_estimates/{round}.pkl', 'wb') as f:
             pickle.dump(estimates, f)
 
 
 def run_wrapper(round):
-    run(max_shift=-1, test=True, return_signals=True,round=round)
+    run(max_shift=0.1, test=False, return_signals=True,round=round)
 
 
 if __name__ == "__main__":
@@ -295,8 +295,9 @@ if __name__ == "__main__":
     with multiprocessing.Pool() as pool:
         # use the pool to apply the worker function to each input in parallel
         pool.map(run_wrapper, inputs)
+        pool.close()
     print(f'time taken to run {rounds} rounds: {time}')
-    # run(max_shift = -1,test=True,round=1)
+    # run(max_shift = 0.1,test=True,round=1)
 
     # TODO: parallelize main()
     # TODO: modify align_all_signals to process only the outputs of the selected models
