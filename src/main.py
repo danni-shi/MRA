@@ -148,7 +148,7 @@ def align_all_signals(X_est_sync, X_est_spc, X_true, classes_spc, classes_est, c
     signal_class_prob = {
         'signals': {'true': X_true,
                     'sync': X_est_sync_aligned,
-                    'spc': X_est_spc_aligned,
+                    'spc-homo': X_est_spc_aligned,
                     'het': X_est
                     },
         'classes': {'true': classes_true,
@@ -156,7 +156,7 @@ def align_all_signals(X_est_sync, X_est_spc, X_true, classes_spc, classes_est, c
                     'het': classes_est
                     },
         'probabilities': {'true': P_true,
-                          'spc': prob_spc,
+                          'spc-homo': prob_spc,
                           'het reassigned': prob_het_reassigned,
                           'het': P_est
                           }
@@ -289,15 +289,15 @@ def run_wrapper(round):
 
 
 if __name__ == "__main__":
-    rounds = 4
-    inputs = range(1, 1+rounds)
-    start = time.time()
-    with multiprocessing.Pool() as pool:
-        # use the pool to apply the worker function to each input in parallel
-        pool.map(run_wrapper, inputs)
-        pool.close()
-    print(f'time taken to run {rounds} rounds: {time}')
-    # run(max_shift = 0.1,test=True,round=1)
+    # rounds = 4
+    # inputs = range(1, 1+rounds)
+    # start = time.time()
+    # with multiprocessing.Pool() as pool:
+    #     # use the pool to apply the worker function to each input in parallel
+    #     pool.map(run_wrapper, inputs)
+    #     pool.close()
+    # print(f'time taken to run {rounds} rounds: {time}')
+    run(max_shift = 0.1,test=True,round=1)
 
     # TODO: parallelize main()
     # TODO: modify align_all_signals to process only the outputs of the selected models

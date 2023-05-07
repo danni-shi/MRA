@@ -670,39 +670,40 @@ def SVD_NRS(H, scale_estimator = 'median'):
     """
     L = H.shape[0]
     ones = np.ones((L,1))
-    
+
     D_inv_sqrt = np.diag(np.sqrt(abs(H).sum(axis = 1))) # diagonal matrix of sqrt of column sum of abs
     H_ss = D_inv_sqrt @ H @ D_inv_sqrt
     U, S, _ = np.linalg.svd(H_ss) # S already sorted in descending order, U are orthonormal basis
     assert np.all(S[:-1] >= S[1:]), 'Singular values are not sorted in desceding order'
-    
+
     u1_hat = U[:,0]; u2_hat = U[:,1]
     u1 = D_inv_sqrt @ ones
     u1 /= np.linalg.norm(u1) # normalize
 
     u1_bar = (U[:,:2] @ U[:,:2].T @ u1).flatten()
-    u1_bar /= np.linalg.norm(u1_bar) # normalize
-    u2_tilde = u1_hat - np.dot(u1_hat,u1_bar)*u1_bar # same as proposed method
-    u2_tilde /= np.linalg.norm(u2_tilde) # normalize
+    # u1_bar /= np.linalg.norm(u1_bar) # normalize
+    # u2_tilde = u1_hat - np.dot(u1_hat,u1_bar)*u1_bar # same as proposed method
+    # u2_tilde /= np.linalg.norm(u2_tilde) # normalize
     # test
     T = np.array([np.dot(u2_hat,u1_bar),-np.dot(u1_hat,u1_bar)])
-    u2_tilde_test = U[:,:2] @ T 
-    
+    u2_tilde_test = U[:,:2] @ T
+
     u2_tilde_test /= np.linalg.norm(u1_bar)
 
-    assert np.linalg.norm(u2_tilde_test.flatten()-u2_tilde) <1e-8 or np.linalg.norm(u2_tilde_test.flatten()+u2_tilde) <1e-8
-    pi = D_inv_sqrt @ u2_tilde.reshape(-1,1)
+    # assert np.linalg.norm(u2_tilde_test.flatten()-u2_tilde) <1e-8 or np.linalg.norm(u2_tilde_test.flatten()+u2_tilde) <1e-8
+    pi = D_inv_sqrt @ u2_tilde_test.reshape(-1,1)
     pi = reconcile_score_signs(H, pi)
     S = lag_vec_to_mat(pi)
-    
-    # median 
+
+    # median
     if scale_estimator == 'median':
-        
-        offset = np.divide(H, S, out=np.zeros(H.shape, dtype=float), where=S!=0)
-        tau = np.median(offset)
-        
-    # regression
-    if scale_estimator == 'regression':    
+
+        offset = np.divide(H, (S+1e-9), out=np.zeros(H.shape, dtype=float), where=np.eye(H.shape[0])==0)
+        tau = np.median(offset[np.where(~np.eye(S.shape[0],dtype=bool))])
+        if tau == 0:
+            tau = np.sum(abs(np.triu(H,k=1)))/np.sum(abs(np.triu(S,k=1)))
+
+    if scale_estimator == 'regression':
         tau = np.sum(abs(np.triu(H,k=1)))/np.sum(abs(np.triu(S,k=1)))
 
     r = tau * pi - tau * np.dot(ones.flatten(), pi.flatten()) * ones / L
@@ -710,6 +711,7 @@ def SVD_NRS(H, scale_estimator = 'median'):
     # test
     r_test = r_test - np.mean(r_test)
     assert np.linalg.norm(r_test.flatten()-r.flatten()) <1e-8 or np.linalg.norm(r_test.flatten()+r.flatten()) <1e-8
+
     return pi.flatten(), r.flatten(), tau
 
 def shift(X, shifts, cyclic = False):
@@ -757,11 +759,11 @@ def get_synchronized_signals(observations, classes, lag_matrix, max_lag = None):
     X_est = np.zeros((L,K))
     
     if not max_lag:
-        max_lag = int(0.2*L)
+        max_lag = L-2
         
     # synchronize the samples in each class
     for c in np.unique(classes):
-        # copmpute the synchronized lags
+        # compute the synchronized lags
         sub_lag_matrix = lag_matrix[classes == c][:,classes == c]
         if (sub_lag_matrix==0).all():
             X_est[:,c] = np.mean(observations[:,classes == c],axis = 1)
@@ -770,7 +772,7 @@ def get_synchronized_signals(observations, classes, lag_matrix, max_lag = None):
             r_rounded = np.array(np.round(r), dtype=int)
             # r_rounded -= min(r_rounded) # make the relative lags start from zero
             # compute the cluster average X
-            sub_observations = observations.T[classes == c][abs(r_rounded) <= max_lag].T
+            sub_observations = observations.T[classes == c][abs(r_rounded) <= (max_lag+2)//2].T
             X_est[:,c] = synchronize(sub_observations, r_rounded[abs(r_rounded) <= max_lag])
 
     return X_est
