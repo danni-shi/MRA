@@ -3,7 +3,7 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 import utils
-import optimization
+from optimization import optimise_matlab
 import pickle
 import time
 from tqdm import tqdm
@@ -218,7 +218,7 @@ def lag_to_ref(X, X_ref, normalised = True, start = 0, lag_range = None):
     """
     X_ref = X_ref.flatten()
     if X.ndim == 1:
-        X.resahpe(-1,1)
+        X.reshape(-1,1)
     assert len(X_ref) == len(X), 'Lengths of data and reference are not equal'
 
     # set default value for the assumed range of lags
@@ -590,7 +590,7 @@ def eval_alignment_het(observations, lag_mat_true, classes = None, classes_true 
         sub_observations = observations[:,classes == c]
         if X_est is None:
             # estimate and align to signal
-            sub_X_est, _, _ = optimization.optimise_matlab(sub_observations, sigma, 1)
+            sub_X_est, _, _ = optimise_matlab(sub_observations, sigma, 1)
             X_est_list.append(sub_X_est.reshape(-1,1))
         else:
             sub_X_est = X_est[:,c]

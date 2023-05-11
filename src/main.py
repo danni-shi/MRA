@@ -193,7 +193,7 @@ def run(sigma_range=np.arange(0.1, 2.1, 0.1),
         max_shift=0.1,
         assumed_max_lag=10,
         models=None,
-        data_path='../../data/data500_logreturns_init3/',
+        data_path='../../data/data500_shift0.04_pvCLCL_init2/',
         return_signals=False,
         round=1):
     if models is None:
@@ -285,19 +285,19 @@ def run(sigma_range=np.arange(0.1, 2.1, 0.1),
 
 
 def run_wrapper(round):
-    run(max_shift=0.1, test=False, return_signals=True,round=round)
+    run(max_shift=0.04, test=False, return_signals=True,round=round)
 
 
 if __name__ == "__main__":
-    # rounds = 4
-    # inputs = range(1, 1+rounds)
-    # start = time.time()
-    # with multiprocessing.Pool() as pool:
-    #     # use the pool to apply the worker function to each input in parallel
-    #     pool.map(run_wrapper, inputs)
-    #     pool.close()
-    # print(f'time taken to run {rounds} rounds: {time}')
-    run(max_shift = 0.1,test=True,round=1)
+    rounds = 4
+    inputs = range(1, 1+rounds)
+    start = time.time()
+    with multiprocessing.Pool() as pool:
+        # use the pool to apply the worker function to each input in parallel
+        pool.map(run_wrapper, inputs)
+        pool.close()
+    print(f'time taken to run {rounds} rounds: {time}')
+    # run(max_shift = 0.04,test=True,round=1)
 
     # TODO: parallelize main()
     # TODO: modify align_all_signals to process only the outputs of the selected models

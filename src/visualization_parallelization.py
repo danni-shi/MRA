@@ -9,12 +9,12 @@ abspath = os.path.abspath(__file__)
 dname = os.path.dirname(abspath)
 os.chdir(dname)
 
-num_rounds = 4
+num_rounds = 1
 ###--- change folder name accroding to experiment specications ---###
-folder_name = f'logreturns_maxlag10_iter4_penalty0'
+folder_name = f'pvCLCLreturns_maxlag2_iter1_penalty0'
 
 # ----- Check these parameters are in sync with main_non_modularized.py -----#
-test = False
+test = True
 
 if test:
     sigma_range = np.arange(0.1, 2.0, 0.5)  # std of random gaussian noise
@@ -62,7 +62,7 @@ col_values = sns.color_palette('Set2')
 color_map = dict(zip(color_labels, col_values))
 
 lty_map = {'sync': 'dotted',
-           'spc': 'dashdot',
+           'spc-homo': 'dashdot',
            'het': 'dashed',
            'true': 'solid'}
 

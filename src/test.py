@@ -176,8 +176,11 @@ accuracy, std = SVD_NRS_test(n_range = n_range,L_range = L_range)
 # annotations = np.char.add(np.char.mod('%.2f', accuracy), '\n' + std.astype(str))
 import seaborn as sns
 
-sns.heatmap(accuracy, annot=std, annot_kws={'va':'top','size':8}, fmt=".2f", cbar=False)
-sns.heatmap(accuracy, annot=True, annot_kws={'va':'bottom'}, xticklabels=n_range, yticklabels=L_range)
+ax = sns.heatmap(accuracy, annot=std, annot_kws={'va':'top','size':8}, fmt=".2f", cbar=False)
+ax = sns.heatmap(accuracy, annot=True, annot_kws={'va':'bottom'}, xticklabels=n_range, yticklabels=L_range)
+ax.set_xlabel('Number of discrete lags')
+ax.set_ylabel('Length of time series')
+ax.set_title('Accuracy and Std of SVD-NRS in Lag Recovery')
 plt.show()
 # sigma = 1
 # X0 = np.arange(1,6).astype('float64')
