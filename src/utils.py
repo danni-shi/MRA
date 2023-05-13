@@ -452,6 +452,7 @@ def assign_classes(observation, X_est):
         dist.append(corrcoef[lag])
     return np.argmax(dist)
 
+
 # def alignment_residual(x1, x2, return_lag = False):
 #     """align the vector x1 after circularly shifting it such that it is optimally aligned with x2 in 2-norm. Calculate the 
 

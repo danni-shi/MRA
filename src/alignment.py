@@ -437,7 +437,7 @@ def lag_mat_post_clustering(lag_mat, classes):
     for c in np.unique(classes):
         mask = (classes==c)[:,None] * (classes!=c)[None,:]
         lag_mat_out[mask] = np.nan
-        np.fill_diagonal(lag_mat_out, np.nan)
+    np.fill_diagonal(lag_mat_out, np.nan)
     
     return lag_mat_out
 
@@ -551,9 +551,97 @@ def eval_lag_mat_het(lag_mat, lag_mat_true, classes, classes_true, penalty=0):
     
 #     return rel_error, accuracy, rel_error_0, accuracy_0, X_est
 
+def latent_signal_homo(observations, classes,sigma):
+    X_est_list = []
+    for c in np.unique(classes):
+        sub_observations = observations[:, classes == c]
+        # estimate and align to signal
+        sub_X_est, _, _ = optimise_matlab(sub_observations, sigma, 1)
+        X_est_list.append(sub_X_est.reshape(-1, 1))
+
+    X_est = np.concatenate(X_est_list, axis=1)
+
+    return X_est
+
+def get_lag_matrix_het(observations, classes, X_est, max_lag =None):
 
 
-def eval_alignment_het(observations, lag_mat_true, classes = None, classes_true = None,  X_est = None, sigma = None, penalty = 0, max_lag = None):
+        # assign observations to the closest cluster centre
+        if classes is None:
+            assert X_est != None, 'Cannot assign classes without cluster signals'
+            classes = np.apply_along_axis(lambda x: utils.assign_classes(x, X_est), 0, observations)
+
+        if X_est is None:
+            X_est_list = []
+
+        N = observations.shape[1]
+        # mask to nan the irrelevant entries
+        lag_mat = np.zeros((N,N))
+        for c in np.unique(classes):
+            # estimate lags from data
+            sub_observations = observations[:, classes == c]
+            sub_X_est = X_est[:, c]
+
+            sub_lag_mat = get_lag_matrix_ref(sub_observations, sub_X_est, max_lag=max_lag)[0]
+            indices = np.where(np.outer(classes==c,classes==c))
+            lag_mat[indices[0], indices[1]] = sub_lag_mat.flatten()
+
+        return lag_mat
+            # np.fill_diagonal(sub_lag_mat, np.nan)
+            #sub_lag_mat_eval = sub_lag_mat[sub_classes_true == c][:, sub_classes_true == c]
+
+        #     n += np.count_nonzero(~np.isnan(sub_lag_mat_eval)) // 2
+        #     # evaluate error and accuracy, weighted by class size
+        #     class_error, class_error_sign, class_accuracy, class_errors = eval_lag_mat(sub_lag_mat_eval,
+        #                                                                                sub_lag_mat_true_eval)
+        #
+        #     rel_error += class_error
+        #     rel_error_sign += class_error_sign
+        #     weight = len(sub_lag_mat) / len(classes)
+        #     accuracy += class_accuracy * weight
+        #     errors_list += class_errors
+        #
+        # rel_error_sign = (rel_error_sign + (n_total - n) * 2) / n_total
+        # # average error of lags
+        # if penalty > 0:
+        #     rel_error = (rel_error + (n_total - n) * penalty) / n_total
+        #     errors_list += [penalty] * (n_total - n)
+        # else:
+        #     rel_error /= n
+        # assert abs(np.mean(
+        #     errors_list) - rel_error) < 1e-6, f'difference in error = {abs(np.mean(errors_list) - rel_error):.3g}'
+        # # store only the errors percentiles
+        # error_percentiles = np.percentile(errors_list, [range(0, 101, 5)]).flatten()
+        #
+        # if X_est is None:
+        #     X_est = np.concatenate(X_est_list, axis=1)
+        #     return rel_error, rel_error_sign, accuracy, error_percentiles, X_est
+        # else:
+        #     return rel_error, rel_error_sign, accuracy, error_percentiles
+
+
+def eval_alignment_het(observations, lag_mat_true, classes, classes_true,  X_est, penalty = 0, max_lag = None):
+    # assign observations to the closest cluster centre
+    # if classes is None:
+    #     assert X_est != None, 'Cannot assign classes without cluster signals'
+    #     classes = np.apply_along_axis(lambda x: utils.assign_classes(x, X_est), 0, observations)
+    #
+    # if X_est is None:
+    #     X_est = latent_signal_homo(observations, classes,sigma)
+
+    lag_mat = get_lag_matrix_het(observations, classes, X_est, max_lag)
+    # lag_mat1 = lag_mat[classes == 0][:, classes == 0]
+    # lag_mat_true1 = lag_mat_true[classes_true == 0][:, classes_true == 0]
+    # lag_mat2 = lag_mat[classes == 1][:, classes == 1]
+    # lag_mat_true2 = lag_mat_true[classes_true == 1][:, classes_true == 1]
+    # assert (lag_mat1[np.triu_indices(len(lag_mat1),1)] == lag_mat_true1[np.triu_indices(len(lag_mat1),1)]).all()
+    # assert (lag_mat2[np.triu_indices(len(lag_mat2), 1)] == lag_mat_true2[np.triu_indices(len(lag_mat2), 1)]).all()
+
+    results = eval_lag_mat_het(lag_mat, lag_mat_true, classes, classes_true, penalty)
+
+    return results
+
+def eval_alignment_het0(observations, lag_mat_true, classes = None, classes_true = None,  X_est = None, sigma = None, penalty = 0, max_lag = None):
     """compare the performance of lead-lag predition using intermidiate latent signal to naive pairwise prediciton
 
     Args:

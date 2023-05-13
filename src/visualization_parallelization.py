@@ -11,9 +11,10 @@ os.chdir(dname)
 
 num_rounds = 1
 ###--- change folder name accroding to experiment specications ---###
-folder_name = f'pvCLCLreturns_maxlag2_iter1_penalty0'
+folder_name = f'test_pvCLCLreturns_maxshifts2_maxlag5_iter4_penalty0'
 
 # ----- Check these parameters are in sync with main_non_modularized.py -----#
+
 test = True
 
 if test:
