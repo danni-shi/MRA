@@ -13,7 +13,7 @@ os.chdir(dname)
 folder_name = 'gaussian_penalty0_maxlag_10'
 
 #----- Check these parameters are in sync with main_non_modularized.py -----#
-test = True
+test = False
 
 if test:
     sigma_range = np.arange(0.1, 2.0, 0.5)  # std of random gaussian noise
@@ -22,8 +22,8 @@ else:
     sigma_range = np.arange(0.1,2.1,0.1) # std of random gaussian noise
     K_range = [2,3,4]
 
-for round in range(1, 3):
-    folder_name = f'gaussian_penalty0_maxlag_10_{round}'
+for round in range(1, 5):
+    folder_name = f'pvCLCLreturns_maxshifts2_assumedmaxlag5_iter4_penalty0_{round}'
     # read saved results
     with open(f'../results/performance/{round}.pkl', 'rb') as f:
             performance = pickle.load(f)
@@ -45,7 +45,7 @@ for round in range(1, 3):
     color_map = dict(zip(color_labels, col_values))
 
     lty_map = {'sync': 'dotted',
-                'spc': 'dashdot',
+                'spc-homo': 'dashdot',
                 'het': 'dashed',
                 'true': 'solid'}
 

@@ -1,9 +1,11 @@
 import numpy as np
 import pandas as pd
-import main
-import matplotlib.pyplot as plt
-import seaborn as sns
 import alignment
+import multiprocessing
+import time
+import scipy.io as spio
+import pickle
+
 
 """
 这是通过为股票进行全局排序从而进行选股择的策略
@@ -32,100 +34,43 @@ def cum_returns(returns, return_type):
 
     return cum_returns
 
-# def lag_vec_to_mat(vec):
-#     # note this function is invariant to addition and subtraction
-#     # of the same value to every element of vec
-#     L = len(vec)
-#     vec = vec.reshape(-1,1)
-#     ones = np.ones((L,1))
-#     return vec @ ones.T - ones @ vec.T
-#
-# def reconcile_score_signs(H,r, G=None):
-#     L = H.shape[0]
-#     ones = np.ones((L,1))
-#
-#     # G is the (true) underlying measurement graph
-#     if G is None:
-#         G = np.ones((L,L)) - np.eye(L)
-#
-#     const_on_rows = np.outer(r,ones)
-#     const_on_cols = np.outer(ones,r)
-#     recompH = const_on_rows - const_on_cols
-#     recompH = recompH * G
-#
-#     # difMtx{1,2} have entries in {-1,0,1}
-#     difMtx1 = np.sign(recompH) - np.sign(H)
-#     difMtx2 = np.sign(recompH) - np.sign(H.T)
-#
-#     # Compute number of upsets:
-#     upset_difMtx_1 = np.sum(abs(difMtx1))/2
-#     upset_difMtx_2 = np.sum(abs(difMtx2))/2
-#
-#     if upset_difMtx_1 > upset_difMtx_2:
-#         r = -r
-#
-#     return r
-#
-# def SVD_NRS(H, scale_estimator = 'median'):
-#     """perform SVD normalised ranking and synchronization on a pairwise score matrix H to obtain a vector of lags
-#
-#     Args:
-#         H (_type_): _description_
-#     """
-#     L = H.shape[0]
-#     ones = np.ones((L,1))
-#
-#     D_inv_sqrt = np.diag(np.sqrt(abs(H).sum(axis = 1))) # diagonal matrix of sqrt of column sum of abs
-#     H_ss = D_inv_sqrt @ H @ D_inv_sqrt
-#     U, S, _ = np.linalg.svd(H_ss) # S already sorted in descending order, U are orthonormal basis
-#     assert np.all(S[:-1] >= S[1:]), 'Singular values are not sorted in desceding order'
-#
-#     u1_hat = U[:,0]; u2_hat = U[:,1]
-#     u1 = D_inv_sqrt @ ones
-#     u1 /= np.linalg.norm(u1) # normalize
-#
-#     u1_bar = (U[:,:2] @ U[:,:2].T @ u1).flatten()
-#     # u1_bar /= np.linalg.norm(u1_bar) # normalize
-#     # u2_tilde = u1_hat - np.dot(u1_hat,u1_bar)*u1_bar # same as proposed method
-#     # u2_tilde /= np.linalg.norm(u2_tilde) # normalize
-#     # test
-#     T = np.array([np.dot(u2_hat,u1_bar),-np.dot(u1_hat,u1_bar)])
-#     u2_tilde_test = U[:,:2] @ T
-#
-#     u2_tilde_test /= np.linalg.norm(u1_bar)
-#
-#     # assert np.linalg.norm(u2_tilde_test.flatten()-u2_tilde) <1e-8 or np.linalg.norm(u2_tilde_test.flatten()+u2_tilde) <1e-8
-#     pi = D_inv_sqrt @ u2_tilde_test.reshape(-1,1)
-#     pi = alignment.reconcile_score_signs(H, pi)
-#     S = alignment.lag_vec_to_mat(pi)
-#
-#     # median
-#     if scale_estimator == 'median':
-#
-#         offset = np.divide(H, (S+1e-9), out=np.zeros(H.shape, dtype=float), where=np.eye(H.shape[0])==0)
-#         tau = np.median(offset[np.where(~np.eye(S.shape[0],dtype=bool))])
-#         if tau == 0:
-#             tau = np.sum(abs(np.triu(H,k=1)))/np.sum(abs(np.triu(S,k=1)))
-#
-#     if scale_estimator == 'regression':
-#         tau = np.sum(abs(np.triu(H,k=1)))/np.sum(abs(np.triu(S,k=1)))
-#
-#     r = tau * pi - tau * np.dot(ones.flatten(), pi.flatten()) * ones / L
-#     r_test = tau * pi
-#     # test
-#     r_test = r_test - np.mean(r_test)
-#     assert np.linalg.norm(r_test.flatten()-r.flatten()) <1e-8 or np.linalg.norm(r_test.flatten()+r.flatten()) <1e-8
-#
-#     return pi.flatten(), r.flatten(), tau
-#
-
-def strategy_plain(returns, lag_matrix, watch_period=1, hold_period=1, leader_prop=0.2, lagger_prop=0.5, rank='plain',
+def strategy_het(returns, lag_matrix, classes, shifts,watch_period=1, hold_period=1, leader_prop=0.2, lagger_prop=0.2, rank='plain',
                    hedge='no'):
-    # 创建数据模版
-    # df1 = pd.read_csv(matrix[1])
-    # df1 = df1.set_index('Unnamed: 0')
+    """
+
+    Returns: the simple returns of the asset at each time step, averaged over different classes
+
+    """
+    results_het = []
+    for c in np.unique(classes):
+        sub_returns  = returns[:, classes == c]
+        if sub_returns.shape[1] > 10: # ignore classes with size below a certain threshold
+            sub_lag_matrix = lag_matrix[classes==c][:, classes == c]
+            sub_results = strategy_plain(sub_returns, sub_lag_matrix, shifts[classes==c], watch_period,
+                                   hold_period, leader_prop, lagger_prop, rank,
+                                   hedge)[0]
+            results_het.append(sub_results)
+
+    return np.array(results_het).mean(axis=0)
+
+def strategy_plain(returns, lag_matrix, shifts,watch_period=1, hold_period=1, leader_prop=0.2, lagger_prop=0.2, rank='plain',
+                   hedge='no'):
+    """
+
+    Args:
+        returns:
+        lag_matrix:
+        watch_period:
+        hold_period:
+        leader_prop:
+        lagger_prop:
+        rank:
+        hedge:
+
+    Returns: the simple returns of the asset at each time step
+
+    """
     result = []
-    sign = 0
     signs = []
     df = pd.DataFrame(lag_matrix)
     L, N = returns.shape
@@ -139,32 +84,32 @@ def strategy_plain(returns, lag_matrix, watch_period=1, hold_period=1, leader_pr
     # date = daily_return.columns[i]
 
     if rank == 'plain':
-        b = pd.DataFrame(df.mean())
-        b.columns = ['avg']
-        # 排序
-        b = b.sort_values(by='avg', ascending=False)
-        lead = b[0:int(leader_prop * N)]
-        lag = b[int(-lagger_prop * N):]
-        # 查找leader和lagger
-        lead = lead.index
-        lag = lag.index
+        ranking = np.mean(lag_matrix,axis=1)
 
     elif rank == 'Synchro':
-        sort_index = np.argsort(alignment.SVD_NRS(lag_matrix)[0])[::-1]
-        lead = sort_index[0:int(leader_prop * N)]
-        lag = sort_index[int(-lagger_prop * N):]
-    stk_list = df.columns
+        ranking = alignment.SVD_NRS(lag_matrix)[0]
+
+    sort_index = np.argsort(ranking)
+    lead_ind = sort_index[:int(leader_prop * N)]
+    lag_ind = sort_index[-int(lagger_prop * N):]
+
+    # calculate the average lag between the leader and lagger groups
+    lag_mat_nan = lag_matrix.copy()
+    np.fill_diagonal(lag_mat_nan, np.nan)
+    leaders = lag_mat_nan[:,lead_ind]
+    laggers = lag_mat_nan[:,lag_ind]
+    ahead = np.mean(leaders[~np.isnan(leaders)]) - np.mean(laggers[~np.isnan(laggers)])
+    ahead = max(0,round(ahead)-1)
     # 选取leader和lagger
 
     # 找到leader和lagger的return
-    leader_returns = returns.iloc[lead]
-    lagger_returns = returns.iloc[lag]
+    leader_returns = returns.iloc[lead_ind]
+    lagger_returns = returns.iloc[lag_ind]
 
     size = len(lagger_returns.columns)
     for i in range(watch_period, L - hold_period):
         # this part is written based on simple returns
         signal = np.sign(np.mean(leader_returns[leader_returns.columns[i - watch_period:i]].sum(axis=1), axis=0))
-        ahead = 0
         # hold period denotes the number of consecutive days we trade the laggers close to close
         alpha = signal * np.mean(lagger_returns[lagger_returns.columns[ahead + i: ahead + i + hold_period]].sum(axis=1), axis=0)
         if hedge == 'no':
@@ -180,6 +125,60 @@ def strategy_plain(returns, lag_matrix, watch_period=1, hold_period=1, leader_pr
         # print(alpha2)
     return result, signs
 
+def run_trading(data_path, K_range, sigma_range, max_shift = 0.04, round = 1, **trading_kwargs):
+    PnL = {f'K={k}': {f'sigma={sigma:.2g}': {} for sigma in sigma_range} for k in K_range}
+
+    with open(f'../results/signal_estimates/{round}.pkl', 'rb') as f:
+        estimates = pickle.load(f)
+    with open(f'../results/lag_matrices/{round}.pkl', 'rb') as f:
+        lag_matrices = pickle.load(f)
+
+    for k in K_range:
+        for sigma in sigma_range:
+            observations_path = data_path + '_'.join(['observations',
+                                              'noise' + f'{sigma:.2g}',
+                                              'shift' + str(max_shift),
+                                              'class' + str(k) + '.mat'])
+            # load returns
+            observations = spio.loadmat(observations_path)['data']
+            shifts = spio.loadmat(observations_path)['shifts'].flatten()
+            lag_mat_dict = lag_matrices[f'K={k}'][f'sigma={sigma:.2g}']
+            classes_spc = estimates[f'K={k}'][f'sigma={sigma:.2g}']['classes']['spc']
+            classes_est = estimates[f'K={k}'][f'sigma={sigma:.2g}']['classes']['het']
+
+            PnL_dict = {}
+            for model, lag_mat in lag_mat_dict.items():
+                if model == 'het':
+                    classes = classes_est
+                else:
+                    classes = classes_spc
+                PnL[f'K={k}'][f'sigma={sigma:.2g}'][model] = strategy_het(observations, lag_mat, classes,shifts = shifts, **trading_kwargs)
+    with open(f'../results/PnL/{round}.pkl', 'wb') as f:
+        pickle.dump(PnL, f)
+
+def run_wrapper(round):
+    data_path = '../../data/data500_shift0.04_pvCLCL_init2/' + str(round) + '/'
+    K_range = [2,3,4]
+    sigma_range = np.arange(0.4, 2.1, 0.5)
+    run_trading(data_path=data_path, K_range=K_range,
+                sigma_range=sigma_range,round=round,rank = 'plain', lagger_prop=0.5)
+
+if __name__ == '__main__':
+    # for testing run without parallelization
+    test = False
+    if test:
+        run_wrapper(round=1)
+    else:
+        rounds = 4
+        inputs = range(1, 1+rounds)
+        start = time.time()
+        with multiprocessing.Pool() as pool:
+            # use the pool to apply the worker function to each input in parallel
+            pool.map(run_wrapper, inputs)
+            pool.close()
+        print(f'time taken to run {rounds} rounds: {time.time() - start}')
+
+"""
 
 n = None
 test = False
@@ -192,7 +191,7 @@ round = 1
 sigma = 0.1
 k = 2
 cum_pnl = []
-sigma_range = np.arange(0.1, 2.1, 0.2)
+sigma_range = np.arange(0.1, 2.1, 0.5)
 return_type = 'simple'
 
 lags = 1
@@ -215,12 +214,11 @@ for sigma in sigma_range:
                                                                      X_est=X_est
                                                                      )
 
-    # sub_observations = observations[:, (classes_true == 0) * (shifts < 2)]
-    # sub_lag_matrix = lag_matrix[(classes_true == 0) * (shifts < 2)][:, (classes_true == 0) * (shifts < 2)]
-    sub_observations = observations[:, (classes_true == 0) * (shifts < lags + 1)]
-    sub_lag_matrix = lag_matrix[(classes_true == 0) * (shifts < lags + 1)][:, (classes_true == 0) * (shifts < lags + 1)]
-    results, signs = strategy_plain(returns=sub_observations, lag_matrix=sub_lag_matrix, lagger_prop=0.2,
-                                    watch_period=1, hold_period=2)
+    sub_observations = observations[:, shifts < 2]
+    sub_lag_matrix = lag_matrix[shifts < 2][:, shifts < 2]
+    sub_classes_true = classes_true[shifts < 2]
+    #
+    results = strategy_het(sub_observations, sub_lag_matrix, sub_classes_true)
 
     cum_pnl.append(results)
 # cmap = {1:'green',-1:'red'}
@@ -238,3 +236,4 @@ for i in range(len(sigma_range)):
     axes[i].legend()
     # axes[i].set_title(f'sigma = {sigma_range[i]:.1g}')
 plt.show()
+"""

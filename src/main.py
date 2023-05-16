@@ -16,6 +16,7 @@ import shutil
 
 import utils
 import alignment
+import trading
 
 
 def read_data(data_path, sigma, max_shift, k, n=None):
@@ -74,10 +75,14 @@ def eval_models(lag_matrix, shifts, assumed_max_lag, \
                 classes_est=None,
                 X_est=None,
                 sigma=None,
-                return_lag_mat=False):
+                return_lag_mat=False,
+                return_PnL=False,
+                **trading_kwargs):
+
     results_dict = {}
     signal_dict = {}
     lag_mat_dict = {}
+    PnL_dict = {}
 
     # ----- Evaluate the lag estimation methods -----#
 
@@ -93,6 +98,7 @@ def eval_models(lag_matrix, shifts, assumed_max_lag, \
                                                   classes_spc,
                                                   classes_true,
                                                   error_penalty)
+
         results_dict['pairwise'] = results_pair
         lag_mat_dict['pairwise'] = lag_matrix
 
@@ -163,11 +169,19 @@ def eval_models(lag_matrix, shifts, assumed_max_lag, \
         results_dict['het'] = results_het
         signal_dict['het'] = X_est
         lag_mat_dict['het'] = lag_mat_het
-
+    return_list = [results_dict, signal_dict]
     if return_lag_mat:
-        return results_dict, signal_dict, lag_mat_dict
-    else:
-        return results_dict, signal_dict
+        return_list.append(lag_mat_dict)
+    if return_PnL:
+        for model, lag_mat in lag_mat_dict.items():
+            if model == 'het':
+                classes = classes_est
+            else:
+                classes = classes_spc
+            PnL_dict[model] = trading.strategy_het(observations, lag_mat, classes, **trading_kwargs)
+        return_list.append(PnL_dict)
+
+    return return_list
 
 
 def align_all_signals(X_est_sync, X_est_spc, X_true, classes_spc, classes_est, classes_true, k, X_est, P_est):
@@ -232,34 +246,34 @@ def empty_folders():
     if os.path.exists('../results/signal_estimates'):
         shutil.rmtree('../results/signal_estimates')
     os.mkdir('../results/signal_estimates')
-    if os.path.exists('results/lag_matrices'):
-        shutil.rmtree('results/lag_matrices')
+    if os.path.exists('../results/lag_matrices'):
+        shutil.rmtree('../results/lag_matrices')
     os.mkdir('../results/lag_matrices')
+    if os.path.exists('../results/PnL'):
+        shutil.rmtree('../results/PnL')
+    os.mkdir('../results/PnL')
 
 
-def run(sigma_range=np.arange(0.1, 2.1, 0.1),
-        K_range=None,
-        n=None,
-        test=False,
-        max_shift=0.04,
-        assumed_max_lag=5,
-        models=None,
-        data_path='../../data/data500_shift0.04_pvCLCL_init2/',
-        return_signals=False,
-        return_lag_mat=False,
-        round=1):
+def run(sigma_range=np.arange(0.1, 2.1, 0.1), K_range=None,
+        n=None, test=False,
+        max_shift=0.04, assumed_max_lag=5,
+        models=None, data_path='../../data/data500_shift0.04_pvCLCL_init2/',
+        return_signals=False, return_lag_mat=False,
+        return_PnL=False, round=1):
+
     if models is None:
         models = ['pairwise', 'sync', 'spc-homo', 'het']
     if K_range is None:
         K_range = [2, 3, 4]
     if test:
-        sigma_range = np.arange(0.1, 2.0, 0.5)
+        sigma_range = np.arange(0.5, 2.1, 0.5)
         K_range = [2]
     metrics = ['error', 'error_sign', 'accuracy', 'errors_quantile']
 
     # initialise containers
     performance = {}
     estimates = {}
+    PnL = {}
     lag_matrices = {}
     for k in tqdm(K_range):
         performance[f'K={k}'] = {'ARI': {'spc': [],
@@ -269,6 +283,7 @@ def run(sigma_range=np.arange(0.1, 2.1, 0.1),
 
         estimates[f'K={k}'] = {}
         lag_matrices[f'K={k}'] = {}
+        PnL[f'K={k}'] = {}
 
         for sigma in tqdm(sigma_range):
 
@@ -301,7 +316,8 @@ def run(sigma_range=np.arange(0.1, 2.1, 0.1),
                                   classes_est=classes_est,
                                   X_est=X_est,
                                   sigma=sigma,
-                                  return_lag_mat=return_lag_mat
+                                  return_lag_mat=return_lag_mat,
+                                  return_PnL=return_PnL
                                   )
             # store model performance results in dictionaries
 
@@ -336,10 +352,13 @@ def run(sigma_range=np.arange(0.1, 2.1, 0.1),
             if return_lag_mat:
                 lag_mat_dict = results[2]
                 lag_matrices[f'K={k}'][f'sigma={sigma:.2g}'] = lag_mat_dict
+            if return_PnL:
+                PnL_dict = results[2+int(return_lag_mat)]
+                PnL[f'K={k}'][f'sigma={sigma:.2g}'] = PnL_dict
 
 
     # save the results to folder
-    empty_folders()
+
     with open(f'../results/performance/{round}.pkl', 'wb') as f:
         pickle.dump(performance, f)
 
@@ -349,22 +368,25 @@ def run(sigma_range=np.arange(0.1, 2.1, 0.1),
     if return_lag_mat:
         with open(f'../results/lag_matrices/{round}.pkl', 'wb') as f:
             pickle.dump(lag_matrices, f)
+    if return_PnL:
+        with open(f'../results/PnL/{round}.pkl', 'wb') as f:
+            pickle.dump(PnL, f)
 
+# set main() run parameters here
 def run_wrapper(round):
-    run(test=False, return_signals=True, round=round)
-
+    run(max_shift=0.04, test=False, return_lag_mat=True, return_signals=True, round=round)
 
 if __name__ == "__main__":
     # remember to untick 'Run with Python console' in config
-    # rounds = 4
-    # inputs = range(1, 1+rounds)
-    # start = time.time()
-    # with multiprocessing.Pool() as pool:
-    #     # use the pool to apply the worker function to each input in parallel
-    #     pool.map(run_wrapper, inputs)
-    #     pool.close()
-    # print(f'time taken to run {rounds} rounds: {time}')
-    run(max_shift=0.04, test=True, return_signals=True, return_lag_mat=True, round=1)
+    rounds = 4
+    inputs = range(1, 1+rounds)
+    start = time.time()
+    with multiprocessing.Pool() as pool:
+        # use the pool to apply the worker function to each input in parallel
+        pool.map(run_wrapper, inputs)
+        pool.close()
+    print(f'time taken to run {rounds} rounds: {time.time() - start}')
+    # run(max_shift=0.04, test=True, return_signals=True, return_lag_mat=True, return_PnL=True, round=2)
 
     # TODO: parallelize main()
     # TODO: modify align_all_signals to process only the outputs of the selected models
