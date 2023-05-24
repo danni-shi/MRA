@@ -31,12 +31,12 @@ def read_data(data_path, sigma, max_shift, k, n=None):
                                          'class' + str(k) + '.mat'])
     observations_mat = spio.loadmat(observations_path)
     results_mat = spio.loadmat(results_path)
-    observations = observations_mat['data'][:, :n]
+    observations = observations_mat['data_train'][:, :n]
     shifts = observations_mat['shifts'].flatten()[:n]
     classes_true = observations_mat['classes'].flatten()[:n] - 1
     X_est = results_mat['x_est']
     P_est = results_mat['p_est'].flatten()
-    X_true = results_mat['x_true']
+    X_true = results_mat['x_true_train']
 
     return observations, shifts, classes_true, X_est, P_est, X_true
 
@@ -257,7 +257,7 @@ def empty_folders():
 def run(sigma_range=np.arange(0.1, 2.1, 0.1), K_range=None,
         n=None, test=False,
         max_shift=0.04, assumed_max_lag=5,
-        models=None, data_path='../../data/data500_shift0.04_pvCLCL_init2/',
+        models=None, data_path='../../data/data500_shift0.04_pvCLCL_init2_set1/',
         return_signals=False, return_lag_mat=False,
         return_PnL=False, round=1):
 
@@ -374,7 +374,7 @@ def run(sigma_range=np.arange(0.1, 2.1, 0.1), K_range=None,
 
 # set main() run parameters here
 def run_wrapper(round):
-    run(max_shift=0.04, test=False, return_lag_mat=True, return_signals=True, round=round)
+    run(max_shift=0.04, K_range=[2], test=False, return_lag_mat=True, return_signals=True, round=round)
 
 if __name__ == "__main__":
     # remember to untick 'Run with Python console' in config

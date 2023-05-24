@@ -19,17 +19,17 @@ plot_signals = False
 test = False
 
 if test:
-    sigma_range = np.arange(0.1, 2.0, 0.5)  # std of random gaussian noise
-    K_range = [2]
+    sigma_range = np.arange(1.5, 1.6, 0.5)  # std of random gaussian noise
+    K_range = [2,3,4]
 else:
     sigma_range = np.arange(0.1, 2.1, 0.1)  # std of random gaussian noise
-    K_range = [2, 3, 4]
+    K_range = [2, 3]
 
 num_rounds = 4
 
 ###--- create the folder to save plots ---###
 # change folder name accroding to experiment specications
-folder_name = f'pvCLCLreturns_maxshifts2_assumedmaxlag5_iter4_penalty0'
+folder_name = f'OS_PnL_lagger0.4_pvCLCLreturns_set1_no_winsorize'
 # folder_name = 'test'
 results_save_dir = utils.save_to_folder('../plots/SPC_cluster', folder_name)
 
@@ -118,7 +118,8 @@ if plot_PnL:
         with open(f'../results/PnL/{round}.pkl', 'rb') as f:
             PnL = pickle.load(f)
             PnL_list.append(PnL)
-    PnL_sigma_range = np.arange(0.4,2.1,0.5)
+    PnL_sigma_range = np.arange(0.5,2.1,0.5)
+    K_range = [2]
     for k in K_range:
         fig, axes = plt.subplots(len(PnL_sigma_range), num_rounds, figsize=(8*num_rounds, 5*len(PnL_sigma_range)),squeeze=False,sharey=True
                                  )

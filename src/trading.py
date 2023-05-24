@@ -34,24 +34,91 @@ def cum_returns(returns, return_type):
 
     return cum_returns
 
-def strategy_het(returns, lag_matrix, classes, shifts,watch_period=1, hold_period=1, leader_prop=0.2, lagger_prop=0.2, rank='plain',
+def winsorize(data, percentiles = (5,95)):
+    # Define the percentile thresholds for winsorizing
+    lower_percentile = percentiles[0]
+    upper_percentile = percentiles[1]
+
+    # Calculate the threshold values
+    lower_threshold = np.percentile(data, lower_percentile)
+    upper_threshold = np.percentile(data, upper_percentile)
+
+    # Winsorize the values
+    winsorized_data = np.clip(data, lower_threshold, upper_threshold)
+
+    return winsorized_data
+
+def lag_mat_to_vec(lag_mat):
+    vec = np.mean(lag_mat)
+    vec = vec - np.min(vec)
+    return vec.astype(int)
+def strategy_two_groups(returns, leaders, laggers, lag, watch_period = 1, hold_period = 1):
+    """
+    Use the past returns of the leaders group to devise long or short trading decisions on the laggers group.
+
+    Args:
+        returns: returns of all stocks
+        leaders: index of leaders
+        laggers: index of laggers
+        lag: The lag between leaders and laggers laggers.
+
+    Returns: returns of trading the laggers portfolio
+
+    """
+    returns = returns.T
+    N, L = returns.shape
+    leader_returns = returns[leaders]
+    lagger_returns = returns[laggers]
+    portfolio_returns = []
+    ahead = lag - 1
+    assert ahead >= 0
+    for t in range(watch_period, L - hold_period -ahead):
+        signal = np.sign(np.sum(leader_returns[:,t - watch_period:t],axis=1))
+        alpha = signal * np.mean(np.sum(lagger_returns[:,ahead + t: ahead + t + hold_period],axis=1),
+                                 axis=0)
+    portfolio_returns.append(alpha)
+    return portfolio_returns
+def strategy_multiple_lags(returns, lag_matrix, shifts,watch_period=1, hold_period=1, leader_prop=0.2, lagger_prop=0.2, rank='plain',
                    hedge='no'):
-    """
+    L, N = returns.shape
+    returns = returns.T
+    # lag_ij = shift_i - shift_j
+    # positive means i lag j
+    ranking = np.mean(np.sign(lag_matrix), axis=1) # vanilla
+    ranking1 = np.mean(lag_matrix, axis=1) # plain
+    ranking2 = alignment.SVD_NRS(lag_matrix)[0] # synchro
+    sort_index = np.argsort(ranking) # ascending
+    lag_ind = sort_index[-int(lagger_prop * N):]
+    # sort_index1 = np.argsort(ranking1)  # ascending
+    # lag_ind1 = sort_index1[-int(lagger_prop * N):]
+    # sort_index2 = np.argsort(ranking2)  # ascending
+    # lag_ind2 = sort_index2[-int(lagger_prop * N):]
+    # lag_mat_nan = lag_matrix.copy()
+    #np.fill_diagonal(lag_mat_nan, np.nan)
+    #leaders = lag_mat_nan[lead_ind,:]
+    laggers = lag_matrix[lag_ind,:].astype(int)
+    # for every lagger we trade, find all the leaders and respective lags
+    leaders_list_by_laggers= [[(i,lag) for i,lag in enumerate(row) if lag>0] for row in laggers]
+    lagger_returns = returns[lag_ind,:]
 
-    Returns: the simple returns of the asset at each time step, averaged over different classes
+    portfolio_returns = []
+    for t in range(watch_period, L - hold_period):
+        signals_by_leader = [np.sum([returns[p[0], t-p[1]] for p in l if (t-p[1] >= 0)]) \
+                   for l in leaders_list_by_laggers]
+        # weights proportional to the strength of signals, sum of absolute values equal to 1
+        weights = winsorize(signals_by_leader)
+        weights = weights/np.sum(np.abs(weights)+1e-9)
+        # total returns of the weighted portfolio
+        alpha = np.dot(weights,np.sum(lagger_returns[:,t:t+hold_period],axis=1))
+        # alpha1 = np.average(np.sum(lagger_returns[:,t:t+hold_period],axis=1),weights=signals_by_leader)
+        # assert abs(alpha - alpha1) < 1e-8
+        if hedge == 'no':
+            portfolio_returns.append(alpha)
+        elif hedge == 'mkt':
+            alpha2 = alpha - np.sum(signals_by_leader) * (returns.loc['SPY'][returns.columns[t:t + hold_period]].sum(axis=0))
+            portfolio_returns.append(alpha2)
 
-    """
-    results_het = []
-    for c in np.unique(classes):
-        sub_returns  = returns[:, classes == c]
-        if sub_returns.shape[1] > 10: # ignore classes with size below a certain threshold
-            sub_lag_matrix = lag_matrix[classes==c][:, classes == c]
-            sub_results = strategy_plain(sub_returns, sub_lag_matrix, shifts[classes==c], watch_period,
-                                   hold_period, leader_prop, lagger_prop, rank,
-                                   hedge)[0]
-            results_het.append(sub_results)
-
-    return np.array(results_het).mean(axis=0)
+    return portfolio_returns
 
 def strategy_plain(returns, lag_matrix, shifts,watch_period=1, hold_period=1, leader_prop=0.2, lagger_prop=0.2, rank='plain',
                    hedge='no'):
@@ -125,22 +192,54 @@ def strategy_plain(returns, lag_matrix, shifts,watch_period=1, hold_period=1, le
         # print(alpha2)
     return result, signs
 
-def run_trading(data_path, K_range, sigma_range, max_shift = 0.04, round = 1, **trading_kwargs):
+def strategy_het(returns, lag_matrix, classes, shifts,watch_period=1, hold_period=1, leader_prop=0.2, lagger_prop=0.2, rank='plain',
+                   hedge='no'):
+    """
+
+    Returns: the simple returns of the asset at each time step, averaged over different classes
+
+    """
+    results_het = []
+    class_labels = np.unique(classes)
+    class_counts = []
+    for c in class_labels:
+        sub_returns = returns[:, classes == c]
+        if sub_returns.shape[1] > 1: # ignore classes with size below a certain threshold
+            sub_lag_matrix = lag_matrix[classes==c][:, classes == c]
+            # sub_results = strategy_plain(sub_returns, sub_lag_matrix, shifts[classes==c], watch_period,
+            #                        hold_period, leader_prop, lagger_prop, rank,
+            #                        hedge)[0]
+            sub_results = strategy_multiple_lags(sub_returns, sub_lag_matrix, shifts[classes == c], watch_period,
+                                                 hold_period, leader_prop, lagger_prop, rank,
+                                                 hedge)
+            class_counts.append(sub_returns.shape[1])
+            results_het.append(sub_results)
+    # everyday return weighted by class size
+    total_pnl = np.average(results_het,axis=0,weights=class_counts)
+
+    return total_pnl
+
+
+def run_trading(data_path, K_range, sigma_range, max_shift = 0.04, round = 1, out_of_sample = False, **trading_kwargs):
     PnL = {f'K={k}': {f'sigma={sigma:.2g}': {} for sigma in sigma_range} for k in K_range}
 
     with open(f'../results/signal_estimates/{round}.pkl', 'rb') as f:
         estimates = pickle.load(f)
     with open(f'../results/lag_matrices/{round}.pkl', 'rb') as f:
         lag_matrices = pickle.load(f)
-
+    n= 10
     for k in K_range:
         for sigma in sigma_range:
             observations_path = data_path + '_'.join(['observations',
                                               'noise' + f'{sigma:.2g}',
                                               'shift' + str(max_shift),
-                                              'class' + str(k) + '.mat'])
+                                              'class' + str(k) +'.mat'])
             # load returns
-            observations = spio.loadmat(observations_path)['data']
+            if out_of_sample:
+                dataset = 'data_test'
+            else:
+                dataset = 'data_train'
+            observations = spio.loadmat(observations_path)[dataset]
             shifts = spio.loadmat(observations_path)['shifts'].flatten()
             lag_mat_dict = lag_matrices[f'K={k}'][f'sigma={sigma:.2g}']
             classes_spc = estimates[f'K={k}'][f'sigma={sigma:.2g}']['classes']['spc']
@@ -152,22 +251,26 @@ def run_trading(data_path, K_range, sigma_range, max_shift = 0.04, round = 1, **
                     classes = classes_est
                 else:
                     classes = classes_spc
-                PnL[f'K={k}'][f'sigma={sigma:.2g}'][model] = strategy_het(observations, lag_mat, classes,shifts = shifts, **trading_kwargs)
+                PnL[f'K={k}'][f'sigma={sigma:.2g}'][model] = strategy_het(observations, lag_mat,
+                                                                              classes, shifts=shifts,
+                                                                              **trading_kwargs)
+                # PnL[f'K={k}'][f'sigma={sigma:.2g}'][model] = strategy_het(observations[:,:n], lag_mat[:n,:n], classes[:n],shifts = shifts[:n], **trading_kwargs)
     with open(f'../results/PnL/{round}.pkl', 'wb') as f:
         pickle.dump(PnL, f)
 
 def run_wrapper(round):
-    data_path = '../../data/data500_shift0.04_pvCLCL_init2/' + str(round) + '/'
-    K_range = [2,3,4]
-    sigma_range = np.arange(0.4, 2.1, 0.5)
+    data_path = '../../data/data500_shift0.04_pvCLCL_init2_set1/' + str(round) + '/'
+    K_range = [2]
+    sigma_range = np.arange(0.5, 2.1, 0.5)
     run_trading(data_path=data_path, K_range=K_range,
-                sigma_range=sigma_range,round=round,rank = 'plain', lagger_prop=0.5)
+                sigma_range=sigma_range,round=round,
+                out_of_sample=True, rank = 'plain', lagger_prop=0.4)
 
 if __name__ == '__main__':
     # for testing run without parallelization
     test = False
     if test:
-        run_wrapper(round=1)
+        run_wrapper(round=2)
     else:
         rounds = 4
         inputs = range(1, 1+rounds)
