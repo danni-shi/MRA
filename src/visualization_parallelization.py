@@ -29,7 +29,7 @@ num_rounds = 4
 
 ###--- create the folder to save plots ---###
 # change folder name accroding to experiment specications
-folder_name = f'OS_PnL_lagger0.4_pvCLCLreturns_set1_no_winsorize'
+folder_name = f'OS_PnL_lagger0.4_pvCLCLreturns_set1_outsample'
 # folder_name = 'test'
 results_save_dir = utils.save_to_folder('../plots/SPC_cluster', folder_name)
 
@@ -113,28 +113,59 @@ if plot_performance:
         plt.savefig(results_save_dir + f'/acc_err_ARI_K={k}')
 ### --- plots of PnL of different methods from trading strategy based on lead-lag relationship ---#
 if plot_PnL:
-    PnL_list = []
+    trading_results_list = []
     for round in range(1, 1 + num_rounds):
         with open(f'../results/PnL/{round}.pkl', 'rb') as f:
-            PnL = pickle.load(f)
-            PnL_list.append(PnL)
+            trading_results = pickle.load(f)
+            trading_results_list.append(trading_results)
     PnL_sigma_range = np.arange(0.5,2.1,0.5)
     K_range = [2]
-    for k in K_range:
-        fig, axes = plt.subplots(len(PnL_sigma_range), num_rounds, figsize=(8*num_rounds, 5*len(PnL_sigma_range)),squeeze=False,sharey=True
-                                 )
-        for i, sigma in enumerate(PnL_sigma_range):
-            for j in range(num_rounds):
-                ax = axes[i, j]
-                ax.set_title(f'Sigma = {sigma}, round {j+1}')
-                ax.set_xlabel('Days')
-                ax.set_ylabel('PnL')
-                for model, values in PnL_list[j][f'K={k}'][f'sigma={sigma:.2g}'].items():
-                    cum_pnl = np.append(np.zeros(1), np.cumsum(values))
-                    ax.plot(np.arange(len(values) + 1), cum_pnl, label=labels[model], color=color_map[model])
-                ax.legend(loc='lower right')
+    # for k in K_range:
+    #     fig, axes = plt.subplots(len(PnL_sigma_range), num_rounds, figsize=(8*num_rounds, 5*len(PnL_sigma_range)),squeeze=False,sharey=True
+    #                              )
+    #     for i, sigma in enumerate(PnL_sigma_range):
+    #         for j in range(num_rounds):
+    #             ax = axes[i, j]
+    #             ax.set_title(f'Sigma = {sigma}, round {j+1}')
+    #             ax.set_xlabel('Days')
+    #             ax.set_ylabel('PnL')
+    #             for model, values in PnL_list[j][f'K={k}'][f'sigma={sigma:.2g}'].items():
+    #                 cum_pnl = np.append(np.zeros(1), np.cumsum(values))
+    #                 ax.plot(np.arange(len(values) + 1), cum_pnl, label=labels[model], color=color_map[model])
+    #             ax.legend(loc='lower right')
+    #
+    #     plt.savefig(results_save_dir + f'/PnL_K={k}')
 
-        plt.savefig(results_save_dir + f'/PnL_K={k}')
+    models = ['pairwise', 'sync', 'spc-homo', 'het']
+    for m in range(num_rounds):
+        for k in K_range:
+            fig, axes = plt.subplots(len(PnL_sigma_range), num_rounds,
+                                     figsize=(8 * len(models), 5 * len(PnL_sigma_range)),
+                                     squeeze=False, sharey=True)
+            for i, sigma in enumerate(PnL_sigma_range):
+                for j, model in enumerate(models):
+                    ax = axes[i, j]
+                    ax.set_title(f'Sigma = {sigma}, model {model}')
+                    ax.set_xlabel('Days')
+                    ax.set_ylabel('PnL')
+                    returns_dict = trading_results_list[m][f'K={k}']\
+                        [f'sigma={sigma:.2g}'][model]['class average']
+                    for group, values in returns_dict['PnL'].items():
+                        # cumsum evaluate the returns of a portfolio of a constant volume
+                        cum_pnl = np.cumsum(values)
+                        # show the average PnL in red and Bold
+                        if group == 'average':
+                            plot_config ={'linestyle': 'solid',
+                                          'color': 'red',
+                                          'linewidth': 2}
+                        else:
+                            plot_config = {'linestyle': 'dashed'}
+                        SR = returns_dict['annualized SR'][group]
+                        mean_PnL = np.mean(values) # include the first few days when no trading occurs
+                        ax.plot(np.arange(len(values)), cum_pnl, label=f'{group}: SR {SR:.3g}; mean PnL {mean_PnL:.3g}', **plot_config)
+                    ax.legend(loc='lower right')
+                    ax.grid(visible=True)
+        plt.savefig(results_save_dir + f'/PnL_K={k}_round{m+1}')
 
 ###--- plots of signal estimates of different methods ---###
 if plot_signals:

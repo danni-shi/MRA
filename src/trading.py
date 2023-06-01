@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import alignment
-import multiprocessing
+import warnings
 import time
 import scipy.io as spio
 import pickle
@@ -34,6 +34,50 @@ def cum_returns(returns, return_type):
 
     return cum_returns
 
+## Some performance metrics
+def annualized_sharpe_ratio(returns):
+    return np.mean(returns)/np.std(returns)*np.sqrt(252)
+
+from scipy import stats
+def corr_SP(returns, signals):
+    res = stats.spearmanr(returns, signals)
+    return res.correlation, res.pvalue
+def hit_ratio(returns, signals):
+    signals_nonzero = signals[signals != 0]
+    returns_nonzero = returns[signals != 0]
+    frac = np.mean(np.sign(returns_nonzero)==np.sign(signals_nonzero))
+    return frac
+def long_ratio(signals):
+    signals = signals[signals != 0]
+    return np.mean(np.sign(signals)==1)
+
+from sklearn.linear_model import LinearRegression
+def regression_score(returns, signals):
+    reg = LinearRegression().fit(signals.reshape(-1,1),returns)
+    return reg.score(signals.reshape(-1,1),returns)
+
+def financial_stats(returns, signals):
+    stats_dict = {
+        'annualized SR': annualized_sharpe_ratio(returns),
+        'corr SP': corr_SP(returns,signals)[0],
+        'corr SP p-value': corr_SP(returns,signals)[1],
+        'hit ratio': hit_ratio(returns, signals),
+        'long ratio': long_ratio(signals),
+        'reg R2':regression_score(returns, signals)
+    }
+    return stats_dict
+def class_average_returns_each_group(returns_dict_list):
+    result = {}
+    mean_result = {}
+    for returns_dict in returns_dict_list:
+        for group, returns in returns_dict.items():
+            value = result.get(group, [])
+            value.append(returns)
+            result[group] = value
+    for group, returns in result.items():
+        mean_result[group] = np.mean(returns, axis=0)
+
+    return mean_result
 def winsorize(data, percentiles = (5,95)):
     # Define the percentile thresholds for winsorizing
     lower_percentile = percentiles[0]
@@ -49,10 +93,10 @@ def winsorize(data, percentiles = (5,95)):
     return winsorized_data
 
 def lag_mat_to_vec(lag_mat):
-    vec = np.mean(lag_mat)
+    vec = np.mean(lag_mat,axis=1)
     vec = vec - np.min(vec)
-    return vec.astype(int)
-def strategy_two_groups(returns, leaders, laggers, lag, watch_period = 1, hold_period = 1):
+    return np.round(vec).astype(int)
+def PnL_two_groups(returns, leaders, laggers, lag, watch_period = 1, hold_period = 1):
     """
     Use the past returns of the leaders group to devise long or short trading decisions on the laggers group.
 
@@ -65,19 +109,86 @@ def strategy_two_groups(returns, leaders, laggers, lag, watch_period = 1, hold_p
     Returns: returns of trading the laggers portfolio
 
     """
-    returns = returns.T
     N, L = returns.shape
     leader_returns = returns[leaders]
     lagger_returns = returns[laggers]
     portfolio_returns = []
     ahead = lag - 1
     assert ahead >= 0
-    for t in range(watch_period, L - hold_period -ahead):
-        signal = np.sign(np.sum(leader_returns[:,t - watch_period:t],axis=1))
-        alpha = signal * np.mean(np.sum(lagger_returns[:,ahead + t: ahead + t + hold_period],axis=1),
+    portfolio_returns = np.full((L,),np.nan)
+    portfolio_signals = np.zeros(L)
+    for t in range(ahead+watch_period+hold_period, L+1):
+        signal = np.sum(leader_returns[:,t - ahead-watch_period-hold_period:t-hold_period])
+        alpha = np.sign(signal) * np.mean(np.sum(lagger_returns[:, t-hold_period:t],axis=1),
                                  axis=0)
-    portfolio_returns.append(alpha)
-    return portfolio_returns
+        portfolio_returns[t-1] = alpha
+        portfolio_signals[t - 1] = signal
+
+    return portfolio_returns, portfolio_signals
+
+def strategy_lag_groups(returns, lag_matrix, shifts, watch_period=1, hold_period=1, return_signal = False):
+    N, L = returns.shape
+    lag_vector0 = lag_mat_to_vec(lag_matrix)
+    pi, r, _ = alignment.SVD_NRS(lag_matrix)
+    lag_vector = np.array(np.round(r), dtype=int)
+    lags, counts = np.unique(lag_vector,return_counts=True)
+    min_group_size = int(0.3*len(lag_vector)/len(counts))
+    lags = lags[counts >= min_group_size]
+    min_lag = np.min(lags)
+    lags -= min_lag
+    lag_vector -= min_lag
+    PnL = {}
+    signals = {}
+    for l1 in lags:
+        for l2 in lags:
+            if l1 < l2:
+                leaders = np.where(lag_vector==l1)[0]
+                laggers = np.where(lag_vector == l2)[0]
+                lag = l2 - l1
+                pnl, signal = PnL_two_groups(returns, leaders, laggers, lag, watch_period, hold_period)
+                PnL[f'{l1}->{l2}'] = pnl
+                signals[f'{l1}->{l2}'] = signal
+    # calculate the simple average of PnL of each group pair
+    PnL['average'] = np.nanmean(np.stack(list(PnL.values())), axis=0)
+
+    # fill nans with 0 for every value in the results dictionary
+    for values in PnL.values():
+        values[np.isnan(values)] = 0
+    results_dict = group_performance(PnL,signals)
+    return results_dict
+
+def group_performance(PnL, signals):
+    # results contains a dictionary for each metric which contains metrics of each group
+    results_dict = {}
+    results_dict['PnL'] = PnL
+    fin_stats_by_group = {}
+    # fin_dict = {}
+    # for group, returns in results.items():
+    #     signal = signals[group]
+    #     fin_stats = financial_stats(returns,signal)
+    #     for metric, value in fin_stats.items():
+    #         metric_dict = fin_dict.get(metric,{})
+    #         metric_dict[group] = value
+    #     fin_dict[metric] =
+    for group in signals.keys():
+        lag_pair = tuple(int(a) for a in group.split('->'))
+        assert lag_pair[0] < lag_pair[1]
+        lag = lag_pair[1] - lag_pair[0]
+        fin_stats = financial_stats(PnL[group][lag:], signals[group][lag:])
+        fin_stats_by_group[group] = fin_stats
+    # fin_stats_by_group = {group:financial_stats(PnL[group],signals[group]) for group in signals.keys()}
+    fin_metrics = ['annualized SR', 'corr SP',
+                   'corr SP p-value', 'hit ratio',
+                   'long ratio', 'reg R2']
+    fin_stats_by_metric = {metric:{group: fin_stats_by_group[group][metric]
+                                   for group in fin_stats_by_group}
+                           for metric in fin_metrics}
+    fin_stats_by_metric['annualized SR']['average'] = annualized_sharpe_ratio(PnL['average'])
+    results_dict['financial_stats'] = fin_stats_by_metric
+
+    return results_dict
+
+
 def strategy_multiple_lags(returns, lag_matrix, shifts,watch_period=1, hold_period=1, leader_prop=0.2, lagger_prop=0.2, rank='plain',
                    hedge='no'):
     L, N = returns.shape
@@ -192,36 +303,49 @@ def strategy_plain(returns, lag_matrix, shifts,watch_period=1, hold_period=1, le
         # print(alpha2)
     return result, signs
 
-def strategy_het(returns, lag_matrix, classes, shifts,watch_period=1, hold_period=1, leader_prop=0.2, lagger_prop=0.2, rank='plain',
+def strategy_het(returns, lag_matrix, classes, shifts,watch_period=1, hold_period=1, class_threshold=None,
                    hedge='no'):
     """
+    returns: NxT np array. N is the number of instruments and T is the number of time points
 
     Returns: the simple returns of the asset at each time step, averaged over different classes
 
     """
-    results_het = []
+    if not class_threshold:
+        class_threshold = int(0.2*returns.shape[0])
+    PnL_list = []
+    results_dict = {}
     class_labels = np.unique(classes)
     class_counts = []
     for c in class_labels:
-        sub_returns = returns[:, classes == c]
-        if sub_returns.shape[1] > 1: # ignore classes with size below a certain threshold
+        sub_returns = returns[classes == c]
+        if sub_returns.shape[0] > class_threshold: # ignore classes with size below a certain threshold
             sub_lag_matrix = lag_matrix[classes==c][:, classes == c]
             # sub_results = strategy_plain(sub_returns, sub_lag_matrix, shifts[classes==c], watch_period,
             #                        hold_period, leader_prop, lagger_prop, rank,
             #                        hedge)[0]
-            sub_results = strategy_multiple_lags(sub_returns, sub_lag_matrix, shifts[classes == c], watch_period,
-                                                 hold_period, leader_prop, lagger_prop, rank,
-                                                 hedge)
+            results = strategy_lag_groups(sub_returns, sub_lag_matrix, shifts[classes == c], watch_period,
+                                                 hold_period)
+            results_dict[f'class {c}'] = results
             class_counts.append(sub_returns.shape[1])
-            results_het.append(sub_results)
-    # everyday return weighted by class size
-    total_pnl = np.average(results_het,axis=0,weights=class_counts)
 
-    return total_pnl
+    # average PnL of each group across all classes
+    PnL_group_list = [{i: results['PnL'][i] for i in results['PnL'] if i != 'average'} for results in results_dict.values()]
+    PnL = class_average_returns_each_group(PnL_group_list)
+
+    # average return weighted by class size
+    pnl_average_list = [results['PnL']['average'] for results in results_dict.values()]
+    pnl_average = np.average(pnl_average_list, axis=0, weights=class_counts)
+    PnL['average'] = pnl_average
+    SR = {group: annualized_sharpe_ratio(returns) for group, returns in PnL.items()}
+    results_dict['class average'] = {'PnL': PnL,
+                                     'annualized SR': SR}
+
+    return results_dict
 
 
-def run_trading(data_path, K_range, sigma_range, max_shift = 0.04, round = 1, out_of_sample = False, **trading_kwargs):
-    PnL = {f'K={k}': {f'sigma={sigma:.2g}': {} for sigma in sigma_range} for k in K_range}
+def run_trading(data_path, K_range, sigma_range, max_shift = 2, round = 1, out_of_sample=True, **trading_kwargs):
+    trading = {f'K={k}': {f'sigma={sigma:.2g}': {} for sigma in sigma_range} for k in K_range}
 
     with open(f'../results/signal_estimates/{round}.pkl', 'rb') as f:
         estimates = pickle.load(f)
@@ -236,49 +360,54 @@ def run_trading(data_path, K_range, sigma_range, max_shift = 0.04, round = 1, ou
                                               'class' + str(k) +'.mat'])
             # load returns
             if out_of_sample:
-                dataset = 'data_test'
+                dataset = 'test'
             else:
-                dataset = 'data_train'
-            observations = spio.loadmat(observations_path)[dataset]
-            shifts = spio.loadmat(observations_path)['shifts'].flatten()
+                dataset = 'train'
+            observations_mat = spio.loadmat(observations_path)
+            observations = observations_mat['data_'+dataset]
+            shifts = observations_mat['shifts'].flatten()
+            index = observations_mat['index_'+dataset].flatten()
             lag_mat_dict = lag_matrices[f'K={k}'][f'sigma={sigma:.2g}']
             classes_spc = estimates[f'K={k}'][f'sigma={sigma:.2g}']['classes']['spc']
             classes_est = estimates[f'K={k}'][f'sigma={sigma:.2g}']['classes']['het']
 
-            PnL_dict = {}
             for model, lag_mat in lag_mat_dict.items():
                 if model == 'het':
                     classes = classes_est
                 else:
                     classes = classes_spc
-                PnL[f'K={k}'][f'sigma={sigma:.2g}'][model] = strategy_het(observations, lag_mat,
+                trading[f'K={k}'][f'sigma={sigma:.2g}'][model] = strategy_het(observations.T, lag_mat,
                                                                               classes, shifts=shifts,
                                                                               **trading_kwargs)
-                # PnL[f'K={k}'][f'sigma={sigma:.2g}'][model] = strategy_het(observations[:,:n], lag_mat[:n,:n], classes[:n],shifts = shifts[:n], **trading_kwargs)
+
     with open(f'../results/PnL/{round}.pkl', 'wb') as f:
-        pickle.dump(PnL, f)
+        pickle.dump(trading, f)
 
 def run_wrapper(round):
-    data_path = '../../data/data500_shift0.04_pvCLCL_init2_set1/' + str(round) + '/'
+    data_path = '../../data/data500_shift2_pvCLCL_init2_set1/' + str(round) + '/'
     K_range = [2]
     sigma_range = np.arange(0.5, 2.1, 0.5)
     run_trading(data_path=data_path, K_range=K_range,
                 sigma_range=sigma_range,round=round,
-                out_of_sample=True, rank = 'plain', lagger_prop=0.4)
+                out_of_sample=True)
 
 if __name__ == '__main__':
     # for testing run without parallelization
     test = False
     if test:
-        run_wrapper(round=2)
+        run_wrapper(round=1)
     else:
+        warnings.filterwarnings(action='ignore', message='Mean of empty slice')
         rounds = 4
-        inputs = range(1, 1+rounds)
         start = time.time()
-        with multiprocessing.Pool() as pool:
-            # use the pool to apply the worker function to each input in parallel
-            pool.map(run_wrapper, inputs)
-            pool.close()
+        for i in range(rounds):
+            run_wrapper(round=i+1)
+        # inputs = range(1, 1+rounds)
+
+        # with multiprocessing.Pool() as pool:
+        #     # use the pool to apply the worker function to each input in parallel
+        #     pool.map(run_wrapper, inputs)
+        #     pool.close()
         print(f'time taken to run {rounds} rounds: {time.time() - start}')
 
 """

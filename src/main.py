@@ -257,7 +257,7 @@ def empty_folders():
 def run(sigma_range=np.arange(0.1, 2.1, 0.1), K_range=None,
         n=None, test=False,
         max_shift=0.04, assumed_max_lag=5,
-        models=None, data_path='../../data/data500_shift0.04_pvCLCL_init2_set1/',
+        models=None, data_path='please check data_path',
         return_signals=False, return_lag_mat=False,
         return_PnL=False, round=1):
 
@@ -374,7 +374,9 @@ def run(sigma_range=np.arange(0.1, 2.1, 0.1), K_range=None,
 
 # set main() run parameters here
 def run_wrapper(round):
-    run(max_shift=0.04, K_range=[2], test=False, return_lag_mat=True, return_signals=True, round=round)
+    run(max_shift=2, K_range=[2], data_path='../../data/data500_shift2_pvCLCL_init2_set1/',
+        test=False, return_lag_mat=True,
+        return_signals=True, round=round)
 
 if __name__ == "__main__":
     # remember to untick 'Run with Python console' in config
@@ -386,7 +388,10 @@ if __name__ == "__main__":
         pool.map(run_wrapper, inputs)
         pool.close()
     print(f'time taken to run {rounds} rounds: {time.time() - start}')
-    # run(max_shift=0.04, test=True, return_signals=True, return_lag_mat=True, return_PnL=True, round=2)
+    # run(max_shift=2, K_range=[2], sigma_range=np.arange(1.0,2.0,0.5),
+    #     data_path='../../data/data500_shift2_pvCLCL_init2_set1/',
+    #     test=False, return_lag_mat=True,
+    #     return_signals=True, round=1)
 
     # TODO: parallelize main()
     # TODO: modify align_all_signals to process only the outputs of the selected models
