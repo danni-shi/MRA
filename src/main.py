@@ -5,6 +5,8 @@ Compare the accuracy of lag recovery between the two methods
 
 import numpy as np
 import pickle
+
+import pandas as pd
 from tqdm import tqdm
 import os
 from sklearn.cluster import SpectralClustering, KMeans
@@ -40,10 +42,7 @@ def read_data(data_path, sigma, max_shift, k, n=None):
 
     return observations, shifts, classes_true, X_est, P_est, X_true
 
-
-def clustering(observations, k, classes_true, assumed_max_lag, X_est, score_fn=alignment.alignment_similarity):
-    # --------- Clustering ----------#
-
+def cluster_SPC(observations, k , assumed_max_lag, score_fn=alignment.alignment_similarity):
     # baseline clustering method, obtain lag matrix from pairwise CCF
     affinity_matrix, lag_matrix = alignment.score_lag_mat(observations, max_lag=assumed_max_lag,
                                                           score_fn=score_fn)
@@ -53,21 +52,34 @@ def clustering(observations, k, classes_true, assumed_max_lag, X_est, score_fn=a
 
     # compare baseline and IVF clustering
     classes_spc = SPC.labels_
+    return classes_spc, lag_matrix
+
+def clustering(observations, k, assumed_max_lag, X_est, classes_true=None,score_fn=alignment.alignment_similarity):
+    # --------- Clustering ----------#
+
+    classes_spc, lag_matrix = cluster_SPC(observations, k, assumed_max_lag, score_fn=score_fn)
     classes_est = np.apply_along_axis(lambda x: utils.assign_classes(x, X_est), 0, observations)
-    classes_spc_aligned = utils.align_classes(classes_spc, classes_true)
-    classes_est_aligned = utils.align_classes(classes_est, classes_true)
-    assert np.sum(classes_spc_aligned == classes_true) >= np.sum(classes_spc == classes_true)
-    assert np.sum(classes_est_aligned == classes_true) >= np.sum(classes_est == classes_true)
-    classes_spc = classes_spc_aligned
-    classes_est = classes_est_aligned
 
-    ARI_dict = {'spc': adjusted_rand_score(classes_true, classes_spc),
-                'het': adjusted_rand_score(classes_true, classes_est)}
+    if not classes_true:
+        classes_est = utils.align_classes(classes_est,classes_spc)
 
-    return classes_spc, classes_est, lag_matrix, ARI_dict
+        return classes_spc, classes_est, lag_matrix
+
+    else:
+        classes_spc_aligned = utils.align_classes(classes_spc, classes_true)
+        classes_est_aligned = utils.align_classes(classes_est, classes_true)
+        assert np.sum(classes_spc_aligned == classes_true) >= np.sum(classes_spc == classes_true)
+        assert np.sum(classes_est_aligned == classes_true) >= np.sum(classes_est == classes_true)
+        classes_spc = classes_spc_aligned
+        classes_est = classes_est_aligned
+
+        ARI_dict = {'spc': adjusted_rand_score(classes_true, classes_spc),
+                    'het': adjusted_rand_score(classes_true, classes_est)}
+
+        return classes_spc, classes_est, lag_matrix, ARI_dict
 
 
-def eval_models(lag_matrix, shifts, assumed_max_lag, \
+def eval_models(lag_matrix, shifts=None, assumed_max_lag=5, \
                 models=['pairwise', 'sync', 'spc-homo', 'het'],
                 observations=None,
                 classes_true=None,
@@ -75,10 +87,11 @@ def eval_models(lag_matrix, shifts, assumed_max_lag, \
                 classes_est=None,
                 X_est=None,
                 sigma=None,
-                return_lag_mat=False,
+                return_signals=False,
+                return_lag_mat=True,
                 return_PnL=False,
                 **trading_kwargs):
-
+    # if shifts if None meannign we are running real data and have no ground truth
     results_dict = {}
     signal_dict = {}
     lag_mat_dict = {}
@@ -87,91 +100,79 @@ def eval_models(lag_matrix, shifts, assumed_max_lag, \
     # ----- Evaluate the lag estimation methods -----#
 
     # ground truth pairwise lag matrix
-    lag_mat_true = alignment.lag_vec_to_mat(shifts)
+    if shifts is not None:
+        lag_mat_true = alignment.lag_vec_to_mat(shifts)
     # error_penalty = int(observations.shape[0]/2)
     error_penalty = 0
 
     if 'pairwise' in models:
-        # SPC + pairwise correlation-based lags
-        results_pair = alignment.eval_lag_mat_het(lag_matrix,
-                                                  lag_mat_true,
-                                                  classes_spc,
-                                                  classes_true,
-                                                  error_penalty)
-
-        results_dict['pairwise'] = results_pair
         lag_mat_dict['pairwise'] = lag_matrix
+        if shifts is not None:
+            # SPC + pairwise correlation-based lags
+            results_pair = alignment.eval_lag_mat_het(
+                lag_matrix,
+                                                      lag_mat_true,
+                                                      classes_spc,
+                                                      classes_true,
+                                                      error_penalty)
+            results_dict['pairwise'] = results_pair
 
     if 'sync' in models:
         # SPC + synchronization
-        X_est_sync = alignment.get_synchronized_signals(observations,
+        X_est_sync = alignment.get_synchronized_signals(
+            observations,
                                                         classes_spc,
                                                         lag_matrix)
-        lag_mat_sync = alignment.get_lag_matrix_het(observations, classes_spc, X_est_sync, assumed_max_lag)
-        results_sync = alignment.eval_lag_mat_het(lag_mat_sync, lag_mat_true, classes_spc, classes_true,
-                                                  error_penalty)
-        # results_sync = \
-        #     alignment.eval_alignment_het(observations,
-        #                                  lag_mat_true,
-        #                                  classes_spc,
-        #                                  classes_true,
-        #                                  X_est_sync,
-        #                                  penalty=error_penalty,
-        #                                  max_lag=assumed_max_lag)
-        results_dict['sync'] = results_sync
+
+        lag_mat_sync = alignment.get_lag_matrix_het(
+            observations,
+                                                    classes_spc,
+                                                    X_est_sync,
+                                                    assumed_max_lag)
         signal_dict['sync'] = X_est_sync
         lag_mat_dict['sync'] = lag_mat_sync
+
+        if shifts is not None:
+            results_sync = alignment.eval_lag_mat_het(
+                lag_mat_sync,
+                lag_mat_true,
+                classes_spc,
+                classes_true,
+                                                      error_penalty)
+            results_dict['sync'] = results_sync
 
     if 'spc-homo' in models:
         # SPC + homogeneous optimization
         X_est_spc_homo = alignment.latent_signal_homo(observations, classes_spc, sigma)
         lag_mat_spc_homo = alignment.get_lag_matrix_het(observations, classes_spc, X_est_spc_homo, assumed_max_lag)
-        results_spc_homo = alignment.eval_lag_mat_het(lag_mat_spc_homo, lag_mat_true, classes_spc, classes_true,
-                                                      error_penalty)
-        # results_spc = \
-        #     alignment.eval_alignment_het(observations,
-        #                                  lag_mat_true,
-        #                                  classes_spc,
-        #                                  classes_true,
-        #                                  X_est_spc_homo,
-        #                                  penalty=error_penalty,
-        #                                  max_lag=assumed_max_lag)
-
-        results_dict['spc-homo'] = results_spc_homo
         signal_dict['spc-homo'] = X_est_spc_homo
         lag_mat_dict['spc-homo'] = lag_mat_spc_homo
+        if shifts is not None:
+            results_spc_homo = alignment.eval_lag_mat_het(lag_mat_spc_homo, lag_mat_true, classes_spc, classes_true,
+                                                          error_penalty)
+            results_dict['spc-homo'] = results_spc_homo
 
     if 'het' in models:
-        # classes = np.apply_along_axis(lambda x: utils.assign_classes(x, kwargs['X_est']), 0, kwargs['observations'])
-        #
-        # lag_mat_het = alignment.get_lag_matrix_het(kwargs['observations'],
-        #                                            classes=classes,
-        #                                            X_est=kwargs['X_est'],
-        #                                            max_lag=assumed_max_lag)
-        #
-        # results_het = alignment.eval_lag_mat_het(lag_mat_het,
-        #                                           lag_mat_true,
-        #                                           classes,
-        #                                           kwargs['classes_true'],
-        #                                           error_penalty)
-
         # heterogeneous optimization
         lag_mat_het = alignment.get_lag_matrix_het(observations, classes_est, X_est, assumed_max_lag)
-        results_het = alignment.eval_lag_mat_het(lag_mat_het, lag_mat_true, classes_est, classes_true, error_penalty)
-        # results_het = \
-        #     alignment.eval_alignment_het(observations,
-        #                                  lag_mat_true,
-        #                                  classes_est,
-        #                                  classes_true,
-        #                                  X_est,
-        #                                  penalty=error_penalty,
-        #                                  max_lag=assumed_max_lag)
-        results_dict['het'] = results_het
         signal_dict['het'] = X_est
         lag_mat_dict['het'] = lag_mat_het
-    return_list = [results_dict, signal_dict]
+        if shifts is not None:
+            results_het = alignment.eval_lag_mat_het(lag_mat_het,
+                                                     lag_mat_true,
+                                                     classes_est,
+                                                     classes_true,
+                                                     error_penalty)
+            results_dict['het'] = results_het
+    # store results in dictionary
+    return_dict = {}
+
+    if shifts is not None:
+        return_dict = {'eval': results_dict}
+    if return_signals:
+        return_dict['signals'] = signal_dict
     if return_lag_mat:
-        return_list.append(lag_mat_dict)
+        return_dict['lag mat'] = lag_mat_dict
     if return_PnL:
         for model, lag_mat in lag_mat_dict.items():
             if model == 'het':
@@ -179,42 +180,48 @@ def eval_models(lag_matrix, shifts, assumed_max_lag, \
             else:
                 classes = classes_spc
             PnL_dict[model] = trading.strategy_het(observations, lag_mat, classes, **trading_kwargs)
-        return_list.append(PnL_dict)
+        return_dict['PnL'] = PnL_dict
 
-    return return_list
+    return return_dict
 
 
 def align_all_signals(X_est_sync, X_est_spc, X_true, classes_spc, classes_est, classes_true, k, X_est, P_est):
-    # aligned the estimated signals and mixing probabilities to the ground truth
-    X_est_sync_aligned, perm = utils.align_to_ref_het(X_est_sync, X_true)
-
-    X_est_spc_aligned, perm = utils.align_to_ref_het(X_est_spc, X_true)
+    # aligned the estimated signals and mixing probabilities to the reference
+    if X_true is None:
+        X_ref = X_est
+    else:
+        X_ref = X_true
+    X_est_sync_aligned, perm = utils.align_to_ref_het(X_est_sync, X_ref)
+    X_est_spc_aligned, perm = utils.align_to_ref_het(X_est_spc, X_ref)
     prob_spc = utils.mixing_prob(classes_spc, k)
     prob_spc = np.array([prob_spc[i] for i in perm])
 
     # reminder that the estimations from heterogeneous IVF method is already aligned with the truth
     prob_het_reassigned = utils.mixing_prob(classes_est, k)
-
-    # true mixing probabilities
-    P_true = [np.mean(classes_true == c) for c in np.unique(classes_true)]
-
     # record estimations for each K and sigma
     signal_class_prob = {
-        'signals': {'true': X_true,
+        'signals': {
                     'sync': X_est_sync_aligned,
                     'spc-homo': X_est_spc_aligned,
                     'het': X_est
                     },
-        'classes': {'true': classes_true,
+        'classes': {
                     'spc': classes_spc,
                     'het': classes_est
                     },
-        'probabilities': {'true': P_true,
+        'probabilities': {
                           'spc-homo': prob_spc,
                           'het reassigned': prob_het_reassigned,
                           'het': P_est
                           }
     }
+    if X_true is not None:
+        signal_class_prob['signals']['true'] = X_true
+    if classes_true is not None:
+        P_true = [np.mean(classes_true == c) for c in np.unique(classes_true)]
+        signal_class_prob['classes']['true'] = classes_true
+        signal_class_prob['probabilities']['true'] = P_true
+
     return signal_class_prob
 
 
@@ -239,6 +246,7 @@ def initialise_containers(K_range, models):
 model labels: ['pairwise', 'sync', 'spc-homo', 'het']
 """
 
+
 def empty_folders():
     if os.path.exists('../results/performance'):
         shutil.rmtree('../results/performance')
@@ -260,7 +268,6 @@ def run(sigma_range=np.arange(0.1, 2.1, 0.1), K_range=None,
         models=None, data_path='please check data_path',
         return_signals=False, return_lag_mat=False,
         return_PnL=False, round=1):
-
     if models is None:
         models = ['pairwise', 'sync', 'spc-homo', 'het']
     if K_range is None:
@@ -316,6 +323,7 @@ def run(sigma_range=np.arange(0.1, 2.1, 0.1), K_range=None,
                                   classes_est=classes_est,
                                   X_est=X_est,
                                   sigma=sigma,
+                                  return_signals=True,
                                   return_lag_mat=return_lag_mat,
                                   return_PnL=return_PnL
                                   )
@@ -325,7 +333,7 @@ def run(sigma_range=np.arange(0.1, 2.1, 0.1), K_range=None,
             for label, value in ARI_dict.items():
                 performance[f'K={k}']['ARI'][label].append(value)
             # prediction performance
-            results_dict = results[0]
+            results_dict = results['eval']
             for i in range(len(metrics)):
                 for model in models:
                     metric = metrics[i]
@@ -333,7 +341,7 @@ def run(sigma_range=np.arange(0.1, 2.1, 0.1), K_range=None,
                     performance[f'K={k}'][metric][model].append(metric_result)
 
             if return_signals:
-                signal_dict = results[1]
+                signal_dict = results['signals']
                 # organize signal estimates, classes estimates and mixing prob estimates
                 signal_class_prob = align_all_signals(X_est_sync=signal_dict['sync'],
                                                       X_est_spc=signal_dict['spc-homo'],
@@ -350,12 +358,11 @@ def run(sigma_range=np.arange(0.1, 2.1, 0.1), K_range=None,
 
             # store the  lag matrices predicted by the models
             if return_lag_mat:
-                lag_mat_dict = results[2]
+                lag_mat_dict = results['lag mat']
                 lag_matrices[f'K={k}'][f'sigma={sigma:.2g}'] = lag_mat_dict
             if return_PnL:
-                PnL_dict = results[2+int(return_lag_mat)]
+                PnL_dict = results['PnL']
                 PnL[f'K={k}'][f'sigma={sigma:.2g}'] = PnL_dict
-
 
     # save the results to folder
 
@@ -372,27 +379,173 @@ def run(sigma_range=np.arange(0.1, 2.1, 0.1), K_range=None,
         with open(f'../results/PnL/{round}.pkl', 'wb') as f:
             pickle.dump(PnL, f)
 
+
+def read_realdata_results(data_path, sigma, k):
+    results_path = data_path + '_'.join(['results',
+                                         'noise' + f'{sigma:.2g}',
+                                         'class' + str(k) + '.mat'])
+    results_mat = spio.loadmat(results_path)
+    X_est = results_mat['x_est']
+    P_est = results_mat['p_est'].flatten()
+
+    return X_est, P_est
+
+
+def normalize_by_column(data):
+    mean = np.mean(data, axis=0)
+    std = np.std(data, axis=0)
+    return (data - mean) / std
+
+
+def run_real_data(sigma_range=np.arange(0.2, 2.1, 0.2), K_range=None,
+                  start_index=0, signal_length=50, assumed_max_lag=5,
+                  models=None, data_path='please check data_path',
+                  estimates_path='please check estimates_path',
+                  return_signals=False, return_lag_mat=False,
+                  return_PnL=False, folder_name = None):
+    if models is None:
+        models = ['pairwise', 'sync', 'spc-homo', 'het']
+    if K_range is None:
+        K_range = [1, 2, 3]
+    assert folder_name is not None, 'need to specify folder name'
+    # read data
+    end_index = start_index + signal_length
+    data = pd.read_csv(data_path, index_col=0).iloc[:,start_index:end_index]
+    ticker = data.index
+    dates = data.columns
+    # obs_normalized = normalize_by_column(np.array(data.T))
+    obs_scaled = data.T / np.std(data.T, axis=0) # do not subtract the mean
+
+    # initialise containers
+    estimates = {}
+    PnL = {}
+    lag_matrices = {}
+    for k in K_range:
+        estimates[f'K={k}'] = {}
+        lag_matrices[f'K={k}'] = {}
+        PnL[f'K={k}'] = {}
+        # SPC clustering and obtain lag_matrix from pairwise CCF
+        classes_spc, lag_matrix = cluster_SPC(obs_scaled, k, assumed_max_lag)
+        for sigma in sigma_range:
+
+            # read data produced from matlab code base
+            X_est, P_est = read_realdata_results(
+                data_path=estimates_path, sigma=sigma, k=k)
+
+            # calculate and align the clustering based on  Het-IVF signal estimates
+            classes_est = np.apply_along_axis(lambda x: utils.assign_classes(x, X_est), 0, obs_scaled)
+            classes_est = utils.align_classes(classes_est, classes_spc)
+            # predict lags matrices using different models
+            results = eval_models(
+                lag_matrix=lag_matrix,
+                assumed_max_lag=assumed_max_lag,
+                models=models,
+                observations=obs_scaled,
+                classes_spc=classes_spc,
+                classes_est=classes_est,
+                X_est=X_est,
+                sigma=sigma,
+                return_signals=return_signals,
+                return_lag_mat=return_lag_mat,
+                return_PnL=return_PnL
+            )
+            # store model performance results in dictionaries
+
+            if return_signals:
+                signal_dict = results['signals']
+                # organize signal estimates, classes estimates and mixing prob estimates
+                signal_class_prob = align_all_signals(X_est_sync=signal_dict['sync'],
+                                                      X_est_spc=signal_dict['spc-homo'],
+                                                      X_true=None,
+                                                      classes_spc=classes_spc,
+                                                      classes_est=classes_est,
+                                                      classes_true=None,
+                                                      k=k,
+                                                      X_est=X_est,
+                                                      P_est=P_est
+                                                      )
+                # store the signal estimates, classes estimates and mixing prob estimates
+                estimates[f'K={k}'][f'sigma={sigma:.2g}'] = signal_class_prob
+
+            # store the  lag matrices predicted by the models
+            if return_lag_mat:
+                lag_mat_dict = results['lag mat']
+                lag_matrices[f'K={k}'][f'sigma={sigma:.2g}'] = lag_mat_dict
+            if return_PnL:
+                PnL_dict = results['PnL']
+                PnL[f'K={k}'][f'sigma={sigma:.2g}'] = PnL_dict
+
+
+    if 'excess' in data_path:
+        folder_name =  folder_name + '_excess'
+    os.mkdir(f'../results/{folder_name}/')
+    if return_signals:
+        sub_dir = f'../results/{folder_name}/signal_estimates'
+        os.mkdir(sub_dir)
+        with open(sub_dir + f'/start{start_index}end{end_index}.pkl', 'wb') as f:
+            pickle.dump(estimates, f)
+    if return_lag_mat:
+        sub_dir = f'../results/{folder_name}/lag_matrices'
+        os.mkdir(sub_dir)
+        with open(sub_dir + f'/start{start_index}end{end_index}.pkl', 'wb') as f:
+            pickle.dump(lag_matrices, f)
+    if return_PnL:
+        sub_dir = f'../results/{folder_name}/PnL'
+        os.mkdir(sub_dir)
+        with open(sub_dir + f'/start{start_index}end{end_index}.pkl', 'wb') as f:
+            pickle.dump(PnL, f)
+
+
 # set main() run parameters here
 def run_wrapper(round):
     run(max_shift=2, K_range=[2], data_path='../../data/data500_shift2_pvCLCL_init2_set1/',
         test=False, return_lag_mat=True,
         return_signals=True, round=round)
 
+def run_wrapper_real_data(start_index):
+    L = 50 # length of signal estimation
+    estimates_path = f'../../data/pvCLCL_results_uncentred/start{start_index+1}_end{start_index+L}/'
+    run_real_data(sigma_range=np.arange(0.2, 2.1, 0.2), K_range=[1, 2, 3],
+                  start_index=start_index, signal_length=L, assumed_max_lag=2,
+                  models=['pairwise', 'sync', 'spc-homo', 'het'],
+                  data_path='../../data/pvCLCL_clean.csv',
+                  estimates_path=estimates_path,
+                  return_signals=True, return_lag_mat=True,
+                  return_PnL=False, folder_name='normalized_uncentred')
+    progress_bar.update(1)
+
 if __name__ == "__main__":
-    # remember to untick 'Run with Python console' in config
-    rounds = 4
-    inputs = range(1, 1+rounds)
+    # real data
+    start = 5; end = 500
+    retrain_period = 10
+    start_indices = range(start, end, retrain_period)
     start = time.time()
-    with multiprocessing.Pool() as pool:
+    # Create a progress bar with total number of tasks
+    progress_bar = tqdm(total=len(start_indices))
+    # map inputs to functions
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
         # use the pool to apply the worker function to each input in parallel
-        pool.map(run_wrapper, inputs)
+        pool.map(run_wrapper_real_data, start_indices)
         pool.close()
-    print(f'time taken to run {rounds} rounds: {time.time() - start}')
+        progress_bar.close()
+    print(f'time taken to run {len(start_indices)} predictions: {time.time() - start}')
+
+
+    # remember to untick 'Run with Python console' in config
+    # rounds = 4
+    # inputs = range(1, 1 + rounds)
+    # start = time.time()
+    # with multiprocessing.Pool() as pool:
+    #     # use the pool to apply the worker function to each input in parallel
+    #     pool.map(run_wrapper, inputs)
+    #     pool.close()
+    # print(f'time taken to run {rounds} rounds: {time.time() - start}')
     # run(max_shift=2, K_range=[2], sigma_range=np.arange(1.0,2.0,0.5),
     #     data_path='../../data/data500_shift2_pvCLCL_init2_set1/',
     #     test=False, return_lag_mat=True,
     #     return_signals=True, round=1)
 
-    # TODO: parallelize main()
+
+
     # TODO: modify align_all_signals to process only the outputs of the selected models
     # note the current maximum shift is 4

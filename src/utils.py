@@ -407,18 +407,20 @@ def align_classes(clustering1, clustering2):
     """
     K1 = len(np.unique(clustering1))
     K2 = len(np.unique(clustering2))
-    # assert K1 == K2, 'clusterings have different number of groups'
-    cost_mat = np.zeros((K1,K2))
-    for i in range(K1):
-        for j in range(K2):
-            a = np.unique(clustering1)[i]
-            b = np.unique(clustering2)[j]
-            intersection = np.sum((clustering1==a) * (clustering2==b))
-            union = np.sum((clustering1==a) + (clustering2==b))
-            cost_mat[i,j] = -intersection/union
-    row_ind, col_ind = linear_sum_assignment(cost_mat)
-    mapping = {np.unique(clustering1)[i]: np.unique(clustering2)[col_ind[i]] for i in range(K1)}
-    clustering1 = np.array(list(map(mapping.get, clustering1)))
+    #assert K1 <= K2, 'clustering has more groups than the reference clustering'
+    # only align the two clusterings if the reference clustering has no fewer groups
+    if K1 <= K2:
+        cost_mat = np.zeros((K1,K2))
+        for i in range(K1):
+            for j in range(K2):
+                a = np.unique(clustering1)[i]
+                b = np.unique(clustering2)[j]
+                intersection = np.sum((clustering1==a) * (clustering2==b))
+                union = np.sum((clustering1==a) + (clustering2==b))
+                cost_mat[i,j] = -intersection/union
+        row_ind, col_ind = linear_sum_assignment(cost_mat)
+        mapping = {np.unique(clustering1)[i]: np.unique(clustering2)[col_ind[i]] for i in range(K1)}
+        clustering1 = np.array(list(map(mapping.get, clustering1)))
 
     return clustering1
             
