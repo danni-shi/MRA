@@ -414,7 +414,7 @@ def run_real_data(sigma_range=np.arange(0.2, 2.1, 0.2), K_range=None,
     ticker = data.index
     dates = data.columns
     # obs_normalized = normalize_by_column(np.array(data.T))
-    obs_scaled = data.T / np.std(data.T, axis=0) # do not subtract the mean
+    obs_scaled = np.array(data.T) / np.std(np.array(data.T), axis=0) # do not subtract the mean
 
     # initialise containers
     estimates = {}
@@ -475,23 +475,16 @@ def run_real_data(sigma_range=np.arange(0.2, 2.1, 0.2), K_range=None,
                 PnL_dict = results['PnL']
                 PnL[f'K={k}'][f'sigma={sigma:.2g}'] = PnL_dict
 
-
-    if 'excess' in data_path:
-        folder_name =  folder_name + '_excess'
-    os.mkdir(f'../results/{folder_name}/')
     if return_signals:
         sub_dir = f'../results/{folder_name}/signal_estimates'
-        os.mkdir(sub_dir)
         with open(sub_dir + f'/start{start_index}end{end_index}.pkl', 'wb') as f:
             pickle.dump(estimates, f)
     if return_lag_mat:
         sub_dir = f'../results/{folder_name}/lag_matrices'
-        os.mkdir(sub_dir)
         with open(sub_dir + f'/start{start_index}end{end_index}.pkl', 'wb') as f:
             pickle.dump(lag_matrices, f)
     if return_PnL:
         sub_dir = f'../results/{folder_name}/PnL'
-        os.mkdir(sub_dir)
         with open(sub_dir + f'/start{start_index}end{end_index}.pkl', 'wb') as f:
             pickle.dump(PnL, f)
 
@@ -505,29 +498,38 @@ def run_wrapper(round):
 def run_wrapper_real_data(start_index):
     L = 50 # length of signal estimation
     estimates_path = f'../../data/pvCLCL_results_uncentred/start{start_index+1}_end{start_index+L}/'
+    folder_name = 'normalized_uncentred'
+
     run_real_data(sigma_range=np.arange(0.2, 2.1, 0.2), K_range=[1, 2, 3],
                   start_index=start_index, signal_length=L, assumed_max_lag=2,
                   models=['pairwise', 'sync', 'spc-homo', 'het'],
                   data_path='../../data/pvCLCL_clean.csv',
                   estimates_path=estimates_path,
                   return_signals=True, return_lag_mat=True,
-                  return_PnL=False, folder_name='normalized_uncentred')
-    progress_bar.update(1)
+                  return_PnL=False, folder_name=folder_name)
+    # progress_bar.update(1)
 
 if __name__ == "__main__":
+    # create folder
+    folder_name = 'normalized_uncentred'
+    utils.create_folder_if_not_existed(f'../results/{folder_name}/')
+    for subfolder in ['signal_estimates', 'lag_matrices', 'PnL']:
+        utils.create_folder_if_not_existed(f'../results/{folder_name}/' + subfolder)
     # real data
-    start = 5; end = 500
+    start = 55; end = 500
     retrain_period = 10
     start_indices = range(start, end, retrain_period)
     start = time.time()
     # Create a progress bar with total number of tasks
-    progress_bar = tqdm(total=len(start_indices))
+    # progress_bar = tqdm(total=len(start_indices))
     # map inputs to functions
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
         # use the pool to apply the worker function to each input in parallel
-        pool.map(run_wrapper_real_data, start_indices)
+        # pool.map(run_wrapper_real_data, start_indices)     previous pool
+        _ = list(tqdm(pool.imap(run_wrapper_real_data, start_indices), total=len(start_indices)))
         pool.close()
-        progress_bar.close()
+        pool.join()
+    # progress_bar.close()
     print(f'time taken to run {len(start_indices)} predictions: {time.time() - start}')
 
 

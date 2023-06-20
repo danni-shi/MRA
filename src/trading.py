@@ -117,7 +117,7 @@ def lag_mat_to_vec(lag_mat):
     return np.round(vec).astype(int)
 
 
-def PnL_two_groups(returns, leaders, laggers, lag, watch_period=1, hold_period=1):
+def PnL_two_groups(returns, leaders, laggers, lag, watch_period=1, hold_period=1, hedge_by_leaders = False):
     """
     Use the past returns of the leaders group to devise long or short trading decisions on the laggers group.
 
@@ -137,14 +137,20 @@ def PnL_two_groups(returns, leaders, laggers, lag, watch_period=1, hold_period=1
     assert ahead >= 0
     portfolio_returns = np.full((L,), np.nan)
     portfolio_signals = np.zeros(L)
+    portfolio_excess_returns_leader = np.full((L,), np.nan)
     for t in range(ahead + watch_period + hold_period, L + 1):
-        signal = np.sum(leader_returns[:, t - ahead - watch_period - hold_period:t - hold_period])
+        signal = np.sum(leader_returns[:, t - ahead - watch_period - hold_period:t - ahead - hold_period])
         alpha = np.sign(signal) * np.mean(np.sum(lagger_returns[:, t - hold_period:t], axis=1),
+                                          axis=0)
+        leader_group_return = np.sign(signal) * np.mean(np.sum(leader_returns[:, t - hold_period:t], axis=1),
                                           axis=0)
         portfolio_returns[t - 1] = alpha
         portfolio_signals[t - 1] = signal
-
-    return portfolio_returns, portfolio_signals
+        portfolio_excess_returns_leader[t - 1] = alpha - leader_group_return
+    if hedge_by_leaders:
+        return portfolio_returns, portfolio_signals, portfolio_excess_returns_leader
+    else:
+        return portfolio_returns, portfolio_signals
 
 
 def strategy_lag_groups(returns, trading_start, trading_end,
@@ -175,7 +181,6 @@ def strategy_lag_groups(returns, trading_start, trading_end,
                 pnl, signal = PnL_two_groups(sub_returns, leaders, laggers, lag, watch_period, hold_period)
                 PnL[f'{l1}->{l2}'] = pnl[days_advanced:]
                 signals[f'{l1}->{l2}'] = signal[days_advanced:]
-
         # calculate the simple average of PnL of each group pair
         PnL['class average'] = np.nanmean(np.stack(list(PnL.values())), axis=0)
         # PnL_excess['class average'] = np.nanmean(np.stack(list(PnL_excess.values())), axis=0)

@@ -7,7 +7,7 @@ import scipy.io as spio
 import pickle
 from trading import *
 from tqdm import tqdm
-
+import os
 
 
 
@@ -22,8 +22,8 @@ def strategy_lag_groups(returns, trading_start, trading_end,
     market_index = market_index.iloc[trading_start - days_advanced:trading_end]
     PnL = {}
     signals = {}
-    PnL_excess = {}
-
+    PnL_excess_mkt = {}
+    PnL_excess_leader = {}
     sub_returns = np.array(sub_returns)
     for l1 in lags:
         for l2 in lags:
@@ -31,28 +31,36 @@ def strategy_lag_groups(returns, trading_start, trading_end,
                 leaders = np.where(lag_vector == l1)[0]
                 laggers = np.where(lag_vector == l2)[0]
                 lag = l2 - l1
-                pnl, signal = PnL_two_groups(sub_returns, leaders, laggers, lag, watch_period, hold_period)
+                pnl, signal, leader_excess_pnl = PnL_two_groups(sub_returns, leaders, laggers, lag, watch_period,
+                                                                hold_period, hedge_by_leaders=True)
                 PnL[f'{l1}->{l2}'] = pnl[days_advanced:]
                 signals[f'{l1}->{l2}'] = signal[days_advanced:]
                 if hedge:
-                    pnl_excess = pnl - np.sign(signal) * np.array(market_index)
-                    PnL_excess[f'{l1}->{l2}'] = pnl_excess[days_advanced:]
+                    pnl_excess_mkt = pnl - np.sign(signal) * np.array(market_index)
+                    PnL_excess_mkt[f'{l1}->{l2}'] = pnl_excess_mkt[days_advanced:]
+                    PnL_excess_leader[f'{l1}->{l2}'] = leader_excess_pnl[days_advanced:]
 
         # calculate the simple average of PnL of each group pair
         PnL['average'] = np.nanmean(np.stack(list(PnL.values())), axis=0)
-        PnL_excess['average'] = np.nanmean(np.stack(list(PnL_excess.values())), axis=0)
+        PnL_excess_mkt['average'] = np.nanmean(np.stack(list(PnL_excess_mkt.values())), axis=0)
+        PnL_excess_leader['average'] = np.nanmean(np.stack(list(PnL_excess_leader.values())), axis=0)
 
         # fill nans with 0 for every value in the results dictionary
         for values in PnL.values():
             values[np.isnan(values)] = 0
-        for values in PnL_excess.values():
+        for values in PnL_excess_mkt.values():
+            values[np.isnan(values)] = 0
+        for values in PnL_excess_leader.values():
             values[np.isnan(values)] = 0
 
+        # calculate financial metrics
         results_dict = group_performance(PnL, signals)
-        results_excess_dict = group_performance(PnL_excess, signals)
+        results_excess_dict = group_performance(PnL_excess_mkt, signals)
+        results_excess_leader_dict = group_performance(PnL_excess_leader, signals)
 
     return {'raw returns': results_dict,
-            'excess returns': results_excess_dict}
+            'mkt excess returns': results_excess_dict,
+            'leader excess returns': results_excess_leader_dict}
 
 
 def group_performance(PnL, signals):
@@ -253,10 +261,14 @@ def strategy_het_real(df_returns, trading_start, trading_end,
                 results_dict[f'class {c}'] = results
                 class_counts.append(count)
 
+    if hedge:
+        return_types = ['raw returns', 'mkt excess returns','leader excess returns']
+    else:
+        return_types = ['raw returns']
     # average PnL of each group across all classes, if any valid results are produced
     if len(results_dict) > 0:
         results_dict['portfolio average'] = {}
-        for key in ['raw returns', 'excess returns']:
+        for key in return_types:
             PnL_group_list = [{i: results[key]['PnL'][i] for i in results[key]['PnL'] \
                                if i != 'average'} for group, results in
                               results_dict.items() if group != 'portfolio average']
@@ -273,7 +285,8 @@ def strategy_het_real(df_returns, trading_start, trading_end,
 
     return results_dict
 
-def trading_single(df_returns, lag_matrices, estimates, k, sigma,
+def trading_single(df_returns,
+                   lag_matrices, estimates, k, sigma,
                    model, trading_period_start, trading_period_end,
                    assumed_max_lag, hedge,  **trading_kwargs):
 
@@ -291,7 +304,8 @@ def trading_single(df_returns, lag_matrices, estimates, k, sigma,
         hedge=hedge, **trading_kwargs)
 
     return trading_results
-def trading_real_data_multiple(data_path, K_range, sigma_range,
+def trading_real_data_multiple(data_path, prediction_path,
+                               K_range, sigma_range,
                       train_period_start=0,
                       train_period_end=500,
                       out_of_sample=True,
@@ -304,9 +318,9 @@ def trading_real_data_multiple(data_path, K_range, sigma_range,
 
     """
     trading = {f'K={k}': {f'sigma={sigma:.2g}': {} for sigma in sigma_range} for k in K_range}
-    with open(f'../results/signal_estimates_real/start{train_period_start}end{train_period_end}.pkl', 'rb') as f:
+    with open(prediction_path + f'/signal_estimates/start{train_period_start}end{train_period_end}.pkl', 'rb') as f:
         estimates = pickle.load(f)
-    with open(f'../results/lag_matrices_real/start{train_period_start}end{train_period_end}.pkl', 'rb') as f:
+    with open(prediction_path + f'/lag_matrices/start{train_period_start}end{train_period_end}.pkl', 'rb') as f:
         lag_matrices = pickle.load(f)
 
     # load returns data
@@ -344,7 +358,7 @@ def trading_real_data_multiple(data_path, K_range, sigma_range,
     with open('../results/PnL_real_excess/' + file_name + '.pkl', 'wb') as f:
         pickle.dump(trading, f)
 
-def trading_real_data(data_path, k, sigma,
+def trading_real_data(data_path, prediction_path, k, sigma,
                       model,
                       train_period_start=0,
                       train_period_end=50,
@@ -358,9 +372,9 @@ def trading_real_data(data_path, k, sigma,
 
     """
     # load lag prediction
-    with open(f'../results/signal_estimates_real/start{train_period_start}end{train_period_end}.pkl', 'rb') as f:
+    with open(prediction_path+f'/signal_estimates/start{train_period_start}end{train_period_end}.pkl', 'rb') as f:
         estimates = pickle.load(f)
-    with open(f'../results/lag_matrices_real/start{train_period_start}end{train_period_end}.pkl', 'rb') as f:
+    with open(prediction_path+f'/lag_matrices/start{train_period_start}end{train_period_end}.pkl', 'rb') as f:
         lag_matrices = pickle.load(f)
 
     # load returns data
@@ -387,16 +401,19 @@ def trading_real_data(data_path, k, sigma,
     # with open('../results/PnL_real_single/' + file_name + '.pkl', 'wb') as f:
     #     pickle.dump(trading, f)
 
-def best_K_and_sigma(df_returns, K_range, sigma_range,
+def best_K_and_sigma(df_returns, prediction_path,
+                     K_range, sigma_range,
                      model,
                       train_period_start=0,
                       train_period_end=50,
                     assumed_max_lag=5,
                       criterion='raw returns'):
     trading = {f'K={k}': {f'sigma={sigma:.2g}': {} for sigma in sigma_range} for k in K_range}
-    with open(f'../results/signal_estimates_real/start{train_period_start}end{train_period_end}.pkl', 'rb') as f:
+
+    # load lag prediction
+    with open(prediction_path+f'/signal_estimates/start{train_period_start}end{train_period_end}.pkl', 'rb') as f:
         estimates = pickle.load(f)
-    with open(f'../results/lag_matrices_real/start{train_period_start}end{train_period_end}.pkl', 'rb') as f:
+    with open(prediction_path+f'/lag_matrices/start{train_period_start}end{train_period_end}.pkl', 'rb') as f:
         lag_matrices = pickle.load(f)
 
     trading_period_start = train_period_start
@@ -408,14 +425,16 @@ def best_K_and_sigma(df_returns, K_range, sigma_range,
     for i, k in enumerate(K_range):
         for j, sigma in enumerate(sigma_range):
             # load estimates of lags
-            trading_results = trading_single(df_returns, lag_matrices, estimates,
+            trading_results = trading_single(df_returns,
+                                             lag_matrices, estimates,
                            k, sigma, model,
                            trading_period_start, trading_period_end,
                            assumed_max_lag, hedge=True)
 
             return_type, metric = criterion.split(' ')
             name_extension = {'raw': 'raw returns',
-                              'excess': 'excess returns',
+                              'mkt excess': 'mkt excess returns',
+                              'leader excess': 'leader excess returns',
                               'returns': 'PnL',
                               'SR': 'annualized SR'}
             return_type = name_extension[return_type]
@@ -430,7 +449,7 @@ def best_K_and_sigma(df_returns, K_range, sigma_range,
 
     return K_range[ind_k], sigma_range[ind_s]
 
-def best_K_and_sigma_for_all(df_returns,
+def best_K_and_sigma_for_all(df_returns, prediction_path,
                              K_range, sigma_range,
                             models,
                           start_indices, signal_length,
@@ -444,7 +463,7 @@ def best_K_and_sigma_for_all(df_returns,
         train_period_end = end_indices[i]
         for j in range(len(models)):
             model = models[j]
-            K_sigma = best_K_and_sigma(df_returns,K_range,sigma_range,model,
+            K_sigma = best_K_and_sigma(df_returns,prediction_path,K_range,sigma_range,model,
                                         train_period_start,train_period_end,assumed_max_lag, criterion)
             result[i,j] = K_sigma
 
@@ -473,7 +492,7 @@ def concat_PnL_real(K, sigma, model,
 
     return_types = ['raw returns']
     if return_excess:
-        return_types.append('excess returns')
+        return_types.append('mkt excess returns')
     PnL_list_dict = {type: [] for type in return_types}
 
     for train_start in start_indices:
@@ -503,7 +522,7 @@ def concat_PnL_real(K, sigma, model,
     else:
         return PnL
 
-def concat_PnL_real2(model,
+def concat_PnL_real2(model, prediction_path,
                     start, end, signal_length,
                     trading_period,
                     return_excess=True,
@@ -524,14 +543,15 @@ def concat_PnL_real2(model,
 
     return_types = ['raw returns']
     if return_excess:
-        return_types.append('excess returns')
+        return_types.append('mkt excess returns')
+        return_types.append('leader excess returns')
     PnL_list_dict = {type: [] for type in return_types}
 
     for train_start in start_indices:
         train_end = train_start + signal_length
         file_name = f'start{train_start}end{train_end}trade{trading_period}'
         folder_name = 'PnL_real_single'
-        with open(f'../results/{folder_name}/{file_name}.pkl', 'rb') as f:
+        with open(f'{prediction_path}/{folder_name}/{file_name}.pkl', 'rb') as f:
             trading = pickle.load(f)
 
         for return_type in return_types:
@@ -557,59 +577,75 @@ def string_to_int(string):
     return int(l[0][1:]), int(l[1][:-1])
 if __name__ == '__main__':
     warnings.filterwarnings(action='ignore', message='Mean of empty slice')
-    # for testing run without parallelization
+    # Use the relevant data and lag prediction for different experiment settings
     data_path = '../../data/pvCLCL_clean.csv'
+    df_returns = pd.read_csv(data_path, index_col=0)  # data
+    prediction_path = '../results/normalized_real'
+    # range of K and sigma we run grid search on
     K_range = [1, 2, 3]
     sigma_range = np.arange(0.2, 2.1, 0.2)
+    # start, ending, training data length, period of retrain
     start = 5;
     end = 500
     retrain_period = 10
     signal_length = 50
     start_indices = range(start, end, retrain_period)
     models = ['pairwise', 'sync', 'spc-homo', 'het']
-    df_returns = pd.read_csv(data_path, index_col=0)
-    df_results = best_K_and_sigma_for_all(df_returns,
-                             K_range, sigma_range,
-                             models,
-                             start_indices, signal_length,
-                                          assumed_max_lag=2,
-                             criterion='raw returns')
-    best_K_sigma_path = '../results/PnL_real_single/best_k_sigma.csv'
+    # grid search on K and sigma for all models based on in-sample performance
+    # df_results = best_K_and_sigma_for_all(df_returns,
+    #                                       prediction_path,
+    #                          K_range, sigma_range,
+    #                          models,
+    #                          start_indices, signal_length,
+    #                                       assumed_max_lag=2,
+    #                          criterion='raw returns')
+    #
+    folder_path = prediction_path + '/PnL_real_single/'
+    # Check if the folder exists
+    # if not os.path.exists(folder_path):
+    #     # Create the folder
+    #     os.makedirs(folder_path)
+    best_K_sigma_path = folder_path + 'best_k_sigma.csv'
     # df_results.to_csv(best_K_sigma_path)
-    # df_results = pd.read_csv(best_K_sigma_path, index_col=0).applymap(eval)
-    # for index in tqdm(df_results.index):
-    #     train_period_start, train_period_end = string_to_int(index)
-    #     trading_results_models = {}
-    #     for model in df_results.columns:
-    #         K, sigma = df_results.loc[index, model]
-    #
-    #         trading = trading_real_data(data_path, K, sigma, model,
-    #                           train_period_start=train_period_start,
-    #                           train_period_end=train_period_start + signal_length,
-    #                           out_of_sample=True,
-    #                           trading_period=retrain_period,
-    #                           assumed_max_lag=2,
-    #                           hedge=True)
-    #         trading_results_models[model] = trading
-    #     file_name = f'start{train_period_start}end{train_period_end}trade{retrain_period}'
-    #     with open('../results/PnL_real_single/' + file_name + '.pkl', 'wb') as f:
-    #         pickle.dump(trading_results_models, f)
-    #
-    # PnL_concat_dict = {}
-    # for model in models:
-    #
-    #     PnL, SR = concat_PnL_real2(
-    #         model, start, end,
-    #         signal_length, retrain_period,
-    #         return_excess=True)
-    #
-    #     PnL_concat_dict[model] = \
-    #         {'PnL': PnL,
-    #         'annualized SR': SR}
-    #
-    # file_name = f'start{start}end{end}_length{signal_length}_trade{retrain_period}'
-    # with open('../results/PnL_real_single/' + file_name + '.pkl', 'wb') as f:
-    #     pickle.dump(PnL_concat_dict, f)
+    df_results = pd.read_csv(best_K_sigma_path, index_col=0).applymap(eval)
+
+    ###--------------------- Trading by sliding window ----------------------------###
+    for index in tqdm(df_results.index):
+        train_period_start, train_period_end = string_to_int(index)
+        trading_results_models = {}
+        for model in df_results.columns:
+            K, sigma = df_results.loc[index, model]
+
+            trading = trading_real_data(data_path, prediction_path, K, sigma, model,
+                              train_period_start=train_period_start,
+                              train_period_end=train_period_start + signal_length,
+                              out_of_sample=True,
+                              trading_period=retrain_period,
+                              assumed_max_lag=2,
+                              hedge=True)
+            trading_results_models[model] = trading
+
+        file_name = f'start{train_period_start}end{train_period_end}trade{retrain_period}'
+
+        with open(folder_path + file_name + '.pkl', 'wb') as f:
+            pickle.dump(trading_results_models, f)
+
+    ###---------------- Concatenate segments of trading results together ----------------------###
+    PnL_concat_dict = {}
+    for model in models:
+
+        PnL, SR = concat_PnL_real2(
+            model, prediction_path, start, end,
+            signal_length, retrain_period,
+            return_excess=True)
+
+        PnL_concat_dict[model] = \
+            {'PnL': PnL,
+            'annualized SR': SR}
+
+    file_name = f'start{start}end{end}_length{signal_length}_trade{retrain_period}'
+    with open(prediction_path + '/PnL_real_single/' + file_name + '.pkl', 'wb') as f:
+        pickle.dump(PnL_concat_dict, f)
 
 
     # df_returns = pd.read_csv(data_path, index_col=0)
