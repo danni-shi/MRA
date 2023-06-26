@@ -9,6 +9,71 @@ from trading import *
 from tqdm import tqdm
 import os
 
+def estimate_volitility(returns, type, window_width):
+    returns = returns.iloc[:, -window_width:]
+    if type == 'std':
+        return np.array(returns.std(axis=1))
+    if type == 'variance':
+        return np.array(returns.std(axis=1))**2
+    if type == 'squared returns':
+        return np.mean(returns.values**2, axis=1)
+
+def weights_by_inverse_vol(returns, type, window_width, winsorize_percentiles=(5, 95)):
+    window_width_recalculated = min(window_width, returns.shape[1])
+    vol = estimate_volitility(returns, type, window_width_recalculated)
+    weights = 1/vol
+    weights = winsorize(weights,winsorize_percentiles)
+    weights /= np.sum(weights)
+
+    return weights
+def PnL_two_groups_real(returns, leaders, laggers, lag,
+                        watch_period=1, hold_period=1,
+                        signal_weights=None, portfolio_weights=None,
+                        return_leader_pnl = False):
+    """
+    Use the past returns of the leaders group to devise long or short trading decisions on the laggers group.
+
+    Args:
+        returns: returns of all stocks
+        leaders: index of leaders
+        laggers: index of laggers
+        lag: The lag between leaders and laggers laggers.
+
+    Returns: returns of trading the laggers portfolio
+
+    """
+    N, L = returns.shape
+    leader_returns = returns[leaders]
+    lagger_returns = returns[laggers]
+    ahead = lag - 1
+    assert ahead >= 0
+    portfolio_returns = np.full((L,), np.nan)
+    portfolio_signals = np.zeros(L)
+    portfolio_leader_pnl = np.full((L,), np.nan)
+
+    if signal_weights is None:
+        signal_weights = np.ones(len(leaders))/len(leaders)
+    if portfolio_weights is None:
+        portfolio_weights = np.ones(len(laggers))/len(laggers)
+
+    for t in range(ahead + watch_period + hold_period, L + 1):
+        signal = np.dot(np.sum(leader_returns[:, t-ahead-watch_period-hold_period:t-ahead-hold_period],axis=1),\
+                        signal_weights)
+        alpha = np.sign(signal) * np.average(np.sum(lagger_returns[:, t - hold_period:t], axis=1),
+                                          axis=0, weights=portfolio_weights)
+        # alpha0=np.sign(signal) * np.mean(np.sum(lagger_returns[:, t - hold_period:t], axis=1))
+        leader_alpha = np.sign(signal) * np.average(np.sum(leader_returns[:, t - hold_period:t], axis=1),
+                                          axis=0, weights=signal_weights)
+
+        portfolio_returns[t - 1] = alpha
+        portfolio_signals[t - 1] = signal
+        portfolio_leader_pnl[t - 1] = leader_alpha # denotes the trend following strategy pnl on leaders
+
+    if return_leader_pnl:
+        return portfolio_returns, portfolio_signals, portfolio_leader_pnl
+    else:
+        return portfolio_returns, portfolio_signals
+
 
 
 def strategy_lag_groups(returns, trading_start, trading_end,
@@ -20,6 +85,8 @@ def strategy_lag_groups(returns, trading_start, trading_end,
     # lag_vector = np.array(np.round(r), dtype=int)
     sub_returns = returns.iloc[:, trading_start - days_advanced:trading_end]
     market_index = market_index.iloc[trading_start - days_advanced:trading_end]
+    return_types = ['raw returns', 'mkt excess returns', 'leader excess returns', 'leader raw returns', 'leader mkt excess returns']
+    results = {return_type: {} for return_type in return_types}
     PnL = {}
     signals = {}
     PnL_excess_mkt = {}
@@ -30,37 +97,57 @@ def strategy_lag_groups(returns, trading_start, trading_end,
             if l1 < l2:
                 leaders = np.where(lag_vector == l1)[0]
                 laggers = np.where(lag_vector == l2)[0]
+                leader_weights = weights_by_inverse_vol(returns.iloc[leaders,:trading_start],
+                                                        'squared returns',
+                                                        window_width=20)
+                lagger_weights = weights_by_inverse_vol(returns.iloc[laggers, :trading_start],
+                                                        'squared returns',
+                                                        window_width=20)
                 lag = l2 - l1
-                pnl, signal, leader_excess_pnl = PnL_two_groups(sub_returns, leaders, laggers, lag, watch_period,
-                                                                hold_period, hedge_by_leaders=True)
-                PnL[f'{l1}->{l2}'] = pnl[days_advanced:]
+                pnl, signal, pnl_leader = PnL_two_groups_real(sub_returns, leaders, laggers, lag,
+                                                              watch_period, hold_period,
+                                                              leader_weights, lagger_weights,
+                                                              return_leader_pnl=True)
+                results['raw returns'][f'{l1}->{l2}'] = pnl
                 signals[f'{l1}->{l2}'] = signal[days_advanced:]
                 if hedge:
-                    pnl_excess_mkt = pnl - np.sign(signal) * np.array(market_index)
-                    PnL_excess_mkt[f'{l1}->{l2}'] = pnl_excess_mkt[days_advanced:]
-                    PnL_excess_leader[f'{l1}->{l2}'] = leader_excess_pnl[days_advanced:]
+                    results['mkt excess returns'][f'{l1}->{l2}'] = pnl - np.sign(signal) * np.array(market_index)
+                    results['leader excess returns'][f'{l1}->{l2}'] = pnl - pnl_leader
+                    results['leader raw returns'][f'{l1}->{l2}'] = pnl_leader
+                    results['leader mkt excess returns'][f'{l1}->{l2}'] = pnl_leader - np.sign(signal) * np.array(market_index)
+    # calculate the simple average of PnL of each group pair
+    for type, returns in results.items():
+        for group, values in returns.items():
+            returns[group] = values[days_advanced:]
 
-        # calculate the simple average of PnL of each group pair
-        PnL['average'] = np.nanmean(np.stack(list(PnL.values())), axis=0)
-        PnL_excess_mkt['average'] = np.nanmean(np.stack(list(PnL_excess_mkt.values())), axis=0)
-        PnL_excess_leader['average'] = np.nanmean(np.stack(list(PnL_excess_leader.values())), axis=0)
-
+        returns['average'] = np.nanmean(np.stack(list(returns.values())), axis=0) # ignore nans when calculating average
         # fill nans with 0 for every value in the results dictionary
-        for values in PnL.values():
+        for values in returns.values():
             values[np.isnan(values)] = 0
-        for values in PnL_excess_mkt.values():
-            values[np.isnan(values)] = 0
-        for values in PnL_excess_leader.values():
-            values[np.isnan(values)] = 0
+        # calculate financial metrics
+        results[type] = group_performance(returns, signals)
+
+        # PnL['average'] = np.nanmean(np.stack(list(PnL.values())), axis=0)
+        # PnL_excess_mkt['average'] = np.nanmean(np.stack(list(PnL_excess_mkt.values())), axis=0)
+        # PnL_excess_leader['average'] = np.nanmean(np.stack(list(PnL_excess_leader.values())), axis=0)
+
+
+        # for values in PnL.values():
+        #     values[np.isnan(values)] = 0
+        # for values in PnL_excess_mkt.values():
+        #     values[np.isnan(values)] = 0
+        # for values in PnL_excess_leader.values():
+        #     values[np.isnan(values)] = 0
 
         # calculate financial metrics
-        results_dict = group_performance(PnL, signals)
-        results_excess_dict = group_performance(PnL_excess_mkt, signals)
-        results_excess_leader_dict = group_performance(PnL_excess_leader, signals)
+        # results_dict = group_performance(PnL, signals)
+        # results_excess_dict = group_performance(PnL_excess_mkt, signals)
+        # results_excess_leader_dict = group_performance(PnL_excess_leader, signals)
 
-    return {'raw returns': results_dict,
-            'mkt excess returns': results_excess_dict,
-            'leader excess returns': results_excess_leader_dict}
+    # return {'raw returns': results_dict,
+    #         'mkt excess returns': results_excess_dict,
+    #         'leader excess returns': results_excess_leader_dict}
+    return results
 
 
 def group_performance(PnL, signals):
@@ -262,7 +349,7 @@ def strategy_het_real(df_returns, trading_start, trading_end,
                 class_counts.append(count)
 
     if hedge:
-        return_types = ['raw returns', 'mkt excess returns','leader excess returns']
+        return_types = ['raw returns', 'mkt excess returns', 'leader excess returns', 'leader raw returns', 'leader mkt excess returns']
     else:
         return_types = ['raw returns']
     # average PnL of each group across all classes, if any valid results are produced
@@ -443,7 +530,7 @@ def best_K_and_sigma(df_returns, prediction_path,
                 result = trading_results['portfolio average'][return_type][metric]['average']
                 score[i, j] = np.sum(result)
             except:
-                print(f'no result at period {trading_period_start} to {trading_period_end} with model {model} at K {k}, sigma {sigma}')
+                print(f'Trading Criteria not met at period {trading_period_start} to {trading_period_end} with model {model} at K {k}, sigma {sigma}')
                 score[i, j] = -np.Inf
     ind_k, ind_s = np.unravel_index(score.argmax(), score.shape)
 
@@ -522,7 +609,7 @@ def concat_PnL_real(K, sigma, model,
     else:
         return PnL
 
-def concat_PnL_real2(model, prediction_path,
+def concat_PnL_real2(model, prediction_path, folder_name,
                     start, end, signal_length,
                     trading_period,
                     return_excess=True,
@@ -543,14 +630,13 @@ def concat_PnL_real2(model, prediction_path,
 
     return_types = ['raw returns']
     if return_excess:
-        return_types.append('mkt excess returns')
-        return_types.append('leader excess returns')
+        return_types = ['raw returns', 'mkt excess returns', 'leader excess returns', 'leader raw returns',
+                        'leader mkt excess returns']
     PnL_list_dict = {type: [] for type in return_types}
 
     for train_start in start_indices:
         train_end = train_start + signal_length
         file_name = f'start{train_start}end{train_end}trade{trading_period}'
-        folder_name = 'PnL_real_single'
         with open(f'{prediction_path}/{folder_name}/{file_name}.pkl', 'rb') as f:
             trading = pickle.load(f)
 
@@ -581,6 +667,7 @@ if __name__ == '__main__':
     data_path = '../../data/pvCLCL_clean.csv'
     df_returns = pd.read_csv(data_path, index_col=0)  # data
     prediction_path = '../results/normalized_real'
+    PnL_folder_name = 'PnL_real_single_weighted'
     # range of K and sigma we run grid search on
     K_range = [1, 2, 3]
     sigma_range = np.arange(0.2, 2.1, 0.2)
@@ -599,43 +686,45 @@ if __name__ == '__main__':
     #                          start_indices, signal_length,
     #                                       assumed_max_lag=2,
     #                          criterion='raw returns')
-    #
-    folder_path = prediction_path + '/PnL_real_single/'
-    # Check if the folder exists
+
+    # folder_path = prediction_path + '/' + PnL_folder_name + '/'
+    # # Check if the folder exists
     # if not os.path.exists(folder_path):
     #     # Create the folder
     #     os.makedirs(folder_path)
-    best_K_sigma_path = folder_path + 'best_k_sigma.csv'
-    # df_results.to_csv(best_K_sigma_path)
-    df_results = pd.read_csv(best_K_sigma_path, index_col=0).applymap(eval)
-
-    ###--------------------- Trading by sliding window ----------------------------###
-    for index in tqdm(df_results.index):
-        train_period_start, train_period_end = string_to_int(index)
-        trading_results_models = {}
-        for model in df_results.columns:
-            K, sigma = df_results.loc[index, model]
-
-            trading = trading_real_data(data_path, prediction_path, K, sigma, model,
-                              train_period_start=train_period_start,
-                              train_period_end=train_period_start + signal_length,
-                              out_of_sample=True,
-                              trading_period=retrain_period,
-                              assumed_max_lag=2,
-                              hedge=True)
-            trading_results_models[model] = trading
-
-        file_name = f'start{train_period_start}end{train_period_end}trade{retrain_period}'
-
-        with open(folder_path + file_name + '.pkl', 'wb') as f:
-            pickle.dump(trading_results_models, f)
+    # best_K_sigma_path = folder_path + 'best_k_sigma.csv'
+    # # df_results.to_csv(best_K_sigma_path)
+    # df_results = pd.read_csv(best_K_sigma_path, index_col=0).applymap(eval)
+    #
+    # ###--------------------- Trading by sliding window ----------------------------###
+    # for row_num, index in tqdm(enumerate(df_results.index)):
+    #     train_period_start, train_period_end = string_to_int(index)
+    #     #train_period_start, train_period_end = index
+    #     trading_results_models = {}
+    #     for col_num, model in enumerate(df_results.columns):
+    #         K, sigma = df_results.iloc[row_num, col_num]
+    #
+    #         trading = trading_real_data(data_path, prediction_path, K, sigma, model,
+    #                           train_period_start=train_period_start,
+    #                           train_period_end=train_period_start + signal_length,
+    #                           out_of_sample=True,
+    #                           trading_period=retrain_period,
+    #                           assumed_max_lag=2,
+    #                           hedge=True)
+    #         trading_results_models[model] = trading
+    #
+    #     file_name = f'start{train_period_start}end{train_period_end}trade{retrain_period}'
+    #
+    #     with open(folder_path + file_name + '.pkl', 'wb') as f:
+    #         pickle.dump(trading_results_models, f)
 
     ###---------------- Concatenate segments of trading results together ----------------------###
     PnL_concat_dict = {}
     for model in models:
 
         PnL, SR = concat_PnL_real2(
-            model, prediction_path, start, end,
+            model, prediction_path, PnL_folder_name,
+            start, end,
             signal_length, retrain_period,
             return_excess=True)
 
@@ -644,7 +733,7 @@ if __name__ == '__main__':
             'annualized SR': SR}
 
     file_name = f'start{start}end{end}_length{signal_length}_trade{retrain_period}'
-    with open(prediction_path + '/PnL_real_single/' + file_name + '.pkl', 'wb') as f:
+    with open(prediction_path + '/' + PnL_folder_name + '/' + file_name + '.pkl', 'wb') as f:
         pickle.dump(PnL_concat_dict, f)
 
 
@@ -652,7 +741,8 @@ if __name__ == '__main__':
     # k_list = []
     # sigma_list = []
     # for model in models:
-    #     k, sigma = best_K_and_sigma(df_returns, K_range, sigma_range,
+    #     k, sigma = best_K_and_sigma(df_returns, K_range,
+    #                                 prediction_path, sigma_range,
     #              model,
     #               train_period_start=5,
     #               train_period_end=55,
