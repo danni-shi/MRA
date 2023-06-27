@@ -497,8 +497,8 @@ def run_wrapper(round):
 
 def run_wrapper_real_data(start_index):
     L = 50 # length of signal estimation
-    estimates_path = f'../../data/pvCLCL_results_uncentred/start{start_index+1}_end{start_index+L}/'
-    folder_name = 'normalized_uncentred'
+    estimates_path = f'../../data/pvCLCL_results/start{start_index+1}_end{start_index+L}/'
+    folder_name = 'normalized_real'
 
     run_real_data(sigma_range=np.arange(0.2, 2.1, 0.2), K_range=[1, 2, 3],
                   start_index=start_index, signal_length=L, assumed_max_lag=2,
@@ -511,12 +511,12 @@ def run_wrapper_real_data(start_index):
 
 if __name__ == "__main__":
     # create folder
-    folder_name = 'normalized_uncentred'
+    folder_name = 'normalized_real'
     utils.create_folder_if_not_existed(f'../results/{folder_name}/')
     for subfolder in ['signal_estimates', 'lag_matrices', 'PnL']:
         utils.create_folder_if_not_existed(f'../results/{folder_name}/' + subfolder)
     # real data
-    start = 55; end = 500
+    start = 505; end = 1180
     retrain_period = 10
     start_indices = range(start, end, retrain_period)
     start = time.time()
